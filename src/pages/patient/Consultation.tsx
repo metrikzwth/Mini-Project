@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import VideoCall from '@/components/video-call/VideoCall';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import PatientNavbar from '@/components/layout/PatientNavbar';
@@ -21,16 +23,22 @@ import { cn } from '@/lib/utils';
 
 const Consultation = () => {
   const { user } = useAuth();
-  const [isInCall, setIsInCall] = useState(false);
+  const location = useLocation();
+  const stateAppointmentId = (location.state as any)?.appointmentId;
+  // Auto-start call if navigated from Join Consultation button
+  const [isInCall, setIsInCall] = useState(!!stateAppointmentId);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
 
-  const confirmedAppointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
-    .filter(a => a.patientId === user?.id && a.status === 'confirmed');
+  const upcomingAppointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
+    .filter(a => a.patientId === user?.id && (a.status === 'pending' || a.status === 'confirmed'));
 
   const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
-  const activeAppointment = confirmedAppointments[0];
+  // Use the specific appointment from state, or fall back to first confirmed
+  const activeAppointment = stateAppointmentId
+    ? upcomingAppointments.find(a => a.id === stateAppointmentId) || upcomingAppointments[0]
+    : upcomingAppointments[0];
   const activeDoctor = activeAppointment ? doctors.find(d => d.id === activeAppointment.doctorId) : null;
 
   useEffect(() => {
@@ -76,113 +84,34 @@ const Consultation = () => {
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Video Call Area */}
           <div className="lg:col-span-2">
-            <Card className="border-2 overflow-hidden">
-              <div className="relative aspect-video bg-foreground/5">
-                {isInCall ? (
-                  <>
-                    {/* Doctor's Video (Main) */}
-                    {/* Doctor's Video (Main) */}
-                    <div className="absolute inset-0 flex items-center justify-center bg-muted">
-                      <div className="w-32 h-32 bg-secondary/20 rounded-full flex items-center justify-center overflow-hidden border">
-                        {activeDoctor?.image && activeDoctor.image !== '/placeholder.svg' ? (
-                          <img src={activeDoctor.image} alt={activeDoctor.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <User className="w-16 h-16 text-secondary" />
-                        )}
-                      </div>
-                      <Badge className="absolute top-4 left-4 bg-secondary">
-                        {activeDoctor?.name || 'Doctor'}
-                      </Badge>
-                    </div>
-
-                    {/* Patient's Video (Picture in Picture) */}
-                    <div className={cn(
-                      "absolute bottom-4 right-4 w-32 h-24 rounded-lg border-2 border-card overflow-hidden",
-                      isVideoOff ? "bg-foreground/10" : "bg-muted"
-                    )}>
-                      {isVideoOff ? (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <VideoOff className="w-6 h-6 text-muted-foreground" />
-                        </div>
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-primary/10">
-                          {user?.image ? (
-                            <img src={user.image} alt="Me" className="w-full h-full object-cover" />
-                          ) : (
-                            <User className="w-8 h-8 text-primary" />
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Call Duration */}
-                    <Badge className="absolute top-4 right-4 bg-destructive">
-                      <span className="animate-pulse mr-2">●</span>
-                      {formatDuration(callDuration)}
-                    </Badge>
-                  </>
-                ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <Video className="w-20 h-20 text-muted-foreground/50 mb-4" />
-                    <h3 className="text-xl font-semibold text-foreground mb-2">Ready to Connect</h3>
-                    <p className="text-muted-foreground text-center max-w-md">
-                      Start a video consultation with your doctor. Make sure your camera and microphone are working properly.
-                    </p>
-                  </div>
-                )}
+            {isInCall && activeAppointment ? (
+              <div className="h-[500px]">
+                <VideoCall
+                  appointmentId={activeAppointment.id}
+                  role="patient"
+                  onEndCall={endCall}
+                />
               </div>
-
-              {/* Call Controls */}
-              <CardContent className="p-6">
-                <div className="flex items-center justify-center gap-4">
-                  {isInCall ? (
-                    <>
-                      <Button
-                        variant="outline"
-                        size="lg"
-                        className={cn(
-                          "rounded-full w-14 h-14",
-                          isMuted && "bg-destructive/10 border-destructive text-destructive"
-                        )}
-                        onClick={() => setIsMuted(!isMuted)}
-                      >
-                        {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-                      </Button>
-
-                      <Button
-                        size="lg"
-                        className="rounded-full w-16 h-16 bg-destructive hover:bg-destructive/90"
-                        onClick={endCall}
-                      >
-                        <Phone className="w-6 h-6 rotate-[135deg]" />
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        size="lg"
-                        className={cn(
-                          "rounded-full w-14 h-14",
-                          isVideoOff && "bg-destructive/10 border-destructive text-destructive"
-                        )}
-                        onClick={() => setIsVideoOff(!isVideoOff)}
-                      >
-                        {isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      size="lg"
-                      className="px-8"
-                      onClick={startCall}
-                      disabled={confirmedAppointments.length === 0}
-                    >
-                      <Video className="w-5 h-5 mr-2" />
-                      Start Video Call
-                    </Button>
-                  )}
+            ) : (
+              <Card className="border-2 overflow-hidden">
+                <div className="relative aspect-video bg-foreground/5 flex flex-col items-center justify-center">
+                  <Video className="w-20 h-20 text-muted-foreground/50 mb-4" />
+                  <h3 className="text-xl font-semibold text-foreground mb-2">Ready to Connect</h3>
+                  <p className="text-muted-foreground text-center max-w-md mb-6">
+                    Start a video consultation with your doctor. Make sure your camera and microphone are working properly.
+                  </p>
+                  <Button
+                    size="lg"
+                    className="px-8"
+                    onClick={startCall}
+                    disabled={!activeAppointment}
+                  >
+                    <Video className="w-5 h-5 mr-2" />
+                    Join Consultation Room
+                  </Button>
                 </div>
-              </CardContent>
-            </Card>
+              </Card>
+            )}
           </div>
 
           {/* Sidebar */}
@@ -196,9 +125,9 @@ const Consultation = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {confirmedAppointments.length > 0 ? (
+                {upcomingAppointments.length > 0 ? (
                   <div className="space-y-3">
-                    {confirmedAppointments.map((apt) => (
+                    {upcomingAppointments.map((apt) => (
                       <div key={apt.id} className="p-3 bg-muted rounded-lg">
                         <p className="font-medium text-foreground">{apt.doctorName}</p>
                         <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">

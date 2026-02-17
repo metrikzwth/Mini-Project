@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import DoctorNavbar from '@/components/layout/DoctorNavbar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,17 +7,23 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
-import { getData, setData, STORAGE_KEYS, Prescription, User } from '@/lib/data';
+import { getData, setData, STORAGE_KEYS, Prescription, User, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
 import { FileText, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const DoctorPrescriptions = () => {
   const { user } = useAuth();
   const patients = getData<User[]>(STORAGE_KEYS.USERS, []).filter(u => u.role === 'patient');
-  const [prescriptions, setPrescriptions] = useState<Prescription[]>(
-    getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []).filter(p => p.doctorId === user?.id || p.doctorName === user?.name)
-  );
-  
+  const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
+
+  useEffect(() => {
+    if (user) {
+      const hiddenIds = getHiddenItems(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user.id);
+      const allRx = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
+      setPrescriptions(allRx.filter(p => (p.doctorId === user.id || p.doctorName === user.name) && !hiddenIds.includes(p.id)));
+    }
+  }, [user]);
+
   const [form, setForm] = useState({ patientId: '', diagnosis: '', notes: '', medicines: [{ name: '', dosage: '', duration: '', instructions: '' }] });
 
   const addMedicine = () => setForm({ ...form, medicines: [...form.medicines, { name: '', dosage: '', duration: '', instructions: '' }] });
@@ -32,20 +38,29 @@ const DoctorPrescriptions = () => {
     e.preventDefault();
     const patient = patients.find(p => p.id === form.patientId);
     if (!patient || !form.diagnosis) { toast.error('Fill all fields'); return; }
-    
+
     const newRx: Prescription = {
       id: `RX${Date.now()}`, patientId: form.patientId, patientName: patient.name,
       doctorId: user?.id || '', doctorName: user?.name || '',
-      date: new Date().toISOString().split('T')[0], diagnosis: form.diagnosis,
+      date: new Date().toISOString().split('T')[0],
+      consultationTime: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      diagnosis: form.diagnosis,
       medicines: form.medicines.filter(m => m.name), notes: form.notes
     };
-    
+
     const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
     all.push(newRx);
     setData(STORAGE_KEYS.PRESCRIPTIONS, all);
     setPrescriptions([newRx, ...prescriptions]);
     setForm({ patientId: '', diagnosis: '', notes: '', medicines: [{ name: '', dosage: '', duration: '', instructions: '' }] });
     toast.success('Prescription created!');
+  };
+
+  const handleDeletePrescription = (rxId: string) => {
+    if (!confirm('Are you sure you want to remove this prescription from your list?')) return;
+    hideItemForUser(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user?.id || '', rxId);
+    setPrescriptions(prev => prev.filter(r => r.id !== rxId));
+    toast.success('Prescription removed from your list');
   };
 
   return (
@@ -87,9 +102,20 @@ const DoctorPrescriptions = () => {
             <CardHeader><CardTitle>Recent Prescriptions</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               {prescriptions.slice(0, 5).map(rx => (
-                <div key={rx.id} className="p-4 bg-muted rounded-lg">
-                  <p className="font-semibold">{rx.patientName}</p>
-                  <p className="text-sm text-muted-foreground">{rx.diagnosis} • {rx.date}</p>
+                <div key={rx.id} className="p-4 bg-muted rounded-lg flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold">{rx.patientName}</p>
+                    <p className="text-sm text-muted-foreground">{rx.diagnosis} • {rx.date}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDeletePrescription(rx.id)}
+                    className="h-7 px-2 text-muted-foreground hover:text-destructive"
+                    title="Delete prescription"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
               ))}
               {prescriptions.length === 0 && <p className="text-center py-8 text-muted-foreground">No prescriptions yet</p>}

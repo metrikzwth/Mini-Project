@@ -78,6 +78,7 @@ export interface Prescription {
   }[];
   diagnosis: string;
   notes?: string;
+  consultationTime?: string; // Time of consultation, e.g. "10:00 AM"
 }
 
 export interface User {
@@ -356,6 +357,9 @@ const STORAGE_KEYS = {
   CURRENT_USER: "medicare_current_user",
   CART: "medicare_cart",
   TRANSACTIONS: "medicare_transactions",
+  HIDDEN_PRESCRIPTIONS: "medicare_hidden_prescriptions",
+  HIDDEN_APPOINTMENTS: "medicare_hidden_appointments",
+  HIDDEN_ORDERS: "medicare_hidden_orders",
 };
 
 // Data access functions
@@ -428,3 +432,24 @@ export const initializeData = () => {
 
 // Export storage keys for use in components
 export { STORAGE_KEYS };
+
+// Per-user hidden items helpers (soft-delete that doesn't affect other users)
+type HiddenMap = Record<string, string[]>; // { userId: [itemId1, itemId2, ...] }
+
+export const hideItemForUser = (storageKey: string, userId: string, itemId: string): void => {
+  const hidden = getData<HiddenMap>(storageKey, {});
+  if (!hidden[userId]) hidden[userId] = [];
+  if (!hidden[userId].includes(itemId)) hidden[userId].push(itemId);
+  setData(storageKey, hidden);
+};
+
+export const getHiddenItems = (storageKey: string, userId: string): string[] => {
+  const hidden = getData<HiddenMap>(storageKey, {});
+  return hidden[userId] || [];
+};
+
+export const clearHiddenItems = (storageKey: string, userId: string, itemIds: string[]): void => {
+  const hidden = getData<HiddenMap>(storageKey, {});
+  hidden[userId] = [...(hidden[userId] || []), ...itemIds.filter(id => !(hidden[userId] || []).includes(id))];
+  setData(storageKey, hidden);
+};

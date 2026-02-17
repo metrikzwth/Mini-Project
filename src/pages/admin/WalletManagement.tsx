@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import AdminSidebar from '@/components/layout/AdminSidebar';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -6,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { Wallet, Search, Edit2, Settings, Save } from 'lucide-react';
+import { Wallet, Search, Edit2, Settings, Save, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface UserWallet {
@@ -21,6 +22,7 @@ interface UserWallet {
 }
 
 const WalletManagement = () => {
+    const navigate = useNavigate();
     const [wallets, setWallets] = useState<UserWallet[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -131,7 +133,12 @@ const WalletManagement = () => {
             <AdminSidebar />
             <div className="flex-1 ml-64 p-8">
                 <div className="flex justify-between items-center mb-6">
-                    <h1 className="text-3xl font-bold">Wallet Management</h1>
+                    <div className="flex items-center gap-4">
+                        <Button variant="outline" size="icon" onClick={() => navigate(-1)}>
+                            <ArrowLeft className="h-4 w-4" />
+                        </Button>
+                        <h1 className="text-3xl font-bold">Wallet Management</h1>
+                    </div>
                 </div>
 
                 <div className="grid gap-6 mb-6">
@@ -210,8 +217,8 @@ const WalletManagement = () => {
                                                     </TableCell>
                                                     <TableCell className="capitalize">
                                                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${wallet.profiles?.role === 'doctor'
-                                                                ? "bg-blue-100 text-blue-800"
-                                                                : "bg-gray-100 text-gray-800"
+                                                            ? "bg-blue-100 text-blue-800"
+                                                            : "bg-gray-100 text-gray-800"
                                                             }`}>
                                                             {wallet.profiles?.role}
                                                         </span>

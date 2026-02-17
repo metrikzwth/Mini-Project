@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,10 +26,12 @@ import { toast } from 'sonner';
 
 const Appointments = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { balance, deductCredits, transferCredits } = useWallet();
   const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []).filter(d => d.isActive);
   const [myAppointments, setMyAppointments] = useState<Appointment[]>(
-    getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []).filter(a => a.patientId === user?.id)
+    getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
+      .filter(a => a.patientId === user?.id && (a.status === 'pending' || a.status === 'confirmed'))
   );
 
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
@@ -95,7 +98,7 @@ const Appointments = () => {
     setData(STORAGE_KEYS.APPOINTMENTS, appointments);
     syncAppointmentToSupabase(newAppointment);
 
-    setMyAppointments(prev => [...prev, newAppointment]);
+    setMyAppointments(prev => [...prev, newAppointment].filter(a => a.status === 'pending' || a.status === 'confirmed'));
     setSelectedDoctor(null);
     setBookingData({ date: '', time: '', type: 'video' });
     setPayWithWallet(false);
@@ -154,8 +157,8 @@ const Appointments = () => {
                           <Clock className="w-4 h-4" /> {apt.time}
                         </span>
                       </div>
-                      {apt.status === 'confirmed' && (
-                        <Button className="w-full mt-4" variant="secondary">
+                      {apt.status === 'confirmed' && apt.type === 'video' && (
+                        <Button className="w-full mt-4" variant="secondary" onClick={() => navigate('/patient/consultation', { state: { appointmentId: apt.id } })}>
                           <Video className="w-4 h-4 mr-2" />
                           Join Consultation
                         </Button>
@@ -272,7 +275,7 @@ const Appointments = () => {
 
               <div className="space-y-2">
                 <Label>Consultation Type</Label>
-                <Select value={bookingData.type} onValueChange={(value: 'video' | 'in-person') => setBookingData({ ...bookingData, type: value })}>
+                <Select value={bookingData.type} onValueChange={(value: 'video' | 'in-person') => { setBookingData({ ...bookingData, type: value }); if (value === 'in-person') setPayWithWallet(false); }}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -284,28 +287,37 @@ const Appointments = () => {
 
               </div>
 
-              <div className="flex items-center gap-2 pt-2 border-t mt-4">
-                <input
-                  type="checkbox"
-                  id="payWithWalletApt"
-                  checked={payWithWallet}
-                  onChange={(e) => setPayWithWallet(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  disabled={balance < (selectedDoctor?.fee || 0)}
-                />
-                <div className="grid gap-1.5 leading-none">
-                  <label
-                    htmlFor="payWithWalletApt"
-                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                  >
-                    Pay with Wallet
-                  </label>
-                  <p className="text-xs text-muted-foreground">
-                    Balance: ${balance.toFixed(2)}
-                    {balance < (selectedDoctor?.fee || 0) && <span className="text-destructive ml-1">(Insufficient)</span>}
+              {bookingData.type === 'video' && (
+                <div className="flex items-center gap-2 pt-2 border-t mt-4">
+                  <input
+                    type="checkbox"
+                    id="payWithWalletApt"
+                    checked={payWithWallet}
+                    onChange={(e) => setPayWithWallet(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    disabled={balance < (selectedDoctor?.fee || 0)}
+                  />
+                  <div className="grid gap-1.5 leading-none">
+                    <label
+                      htmlFor="payWithWalletApt"
+                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      Pay with Wallet
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      Balance: ${balance.toFixed(2)}
+                      {balance < (selectedDoctor?.fee || 0) && <span className="text-destructive ml-1">(Insufficient)</span>}
+                    </p>
+                  </div>
+                </div>
+              )}
+              {bookingData.type === 'in-person' && (
+                <div className="pt-2 border-t mt-4">
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    💵 Payment will be collected in cash at the clinic
                   </p>
                 </div>
-              </div>
+              )}
             </div>
 
             <DialogFooter>

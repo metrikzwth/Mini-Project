@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { useWallet } from "@/contexts/WalletContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,11 +21,12 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-import { History, Wallet as WalletIcon, DollarSign } from "lucide-react";
+import { History, Wallet as WalletIcon, DollarSign, ArrowLeft } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 
 const DoctorWallet = () => {
+    const navigate = useNavigate();
     const { balance, transactions, requestPayout, isLoading } = useWallet();
     const { user } = useAuth();
     const [amount, setAmount] = useState("");
@@ -72,7 +74,12 @@ const DoctorWallet = () => {
     return (
         <div className="container mx-auto p-6 space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-3xl font-bold tracking-tight">Doctor Earnings</h1>
+                <div className="flex items-center gap-4">
+                    <Button variant="outline" size="icon" onClick={() => navigate(-1)}>
+                        <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <h1 className="text-3xl font-bold tracking-tight">Doctor Earnings</h1>
+                </div>
                 <div className="flex items-center gap-2 text-muted-foreground">
                     <WalletIcon className="w-5 h-5" />
                     <span>Wallet ID: {user?.id.slice(0, 8)}...</span>
@@ -86,12 +93,12 @@ const DoctorWallet = () => {
                         <CardTitle className="text-lg font-medium opacity-90">Current Earnings</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-4xl font-bold">{balance.toFixed(2)} Credits</div>
+                        <div className="text-4xl font-bold">{Math.floor(balance)} Credits</div>
                         <p className="text-sm opacity-80 mt-2">Total accumulated earnings from consultations.</p>
                         {conversionRate && (
                             <div className="mt-4 pt-4 border-t border-secondary-foreground/20">
                                 <p className="text-sm font-medium opacity-90">Estimated Value:</p>
-                                <p className="text-2xl font-bold">${(balance * parseFloat(conversionRate)).toFixed(2)}</p>
+                                <p className="text-2xl font-bold">${(Math.floor(balance) * parseFloat(conversionRate)).toFixed(2)}</p>
                                 <p className="text-xs opacity-70">Rate: 1 Credit = ${parseFloat(conversionRate).toFixed(2)}</p>
                             </div>
                         )}
@@ -122,10 +129,10 @@ const DoctorWallet = () => {
                                         disabled={isProcessing}
                                     />
                                 </div>
-                                <p className="text-xs text-muted-foreground">Available to withdraw: {balance.toFixed(2)} Credits</p>
+                                <p className="text-xs text-muted-foreground">Available to withdraw: {Math.floor(balance)} Credits</p>
                                 {conversionRate && amount && !isNaN(parseFloat(amount)) && (
                                     <p className="text-xs text-green-600 font-medium">
-                                        You will receive approx. ${(parseFloat(amount) * parseFloat(conversionRate)).toFixed(2)}
+                                        You will receive approx. ${(Math.floor(parseFloat(amount)) * parseFloat(conversionRate)).toFixed(2)}
                                     </p>
                                 )}
                             </div>
@@ -182,9 +189,9 @@ const DoctorWallet = () => {
                                             </span>
                                         </TableCell>
                                         <TableCell>{txn.description}</TableCell>
-                                        <TableCell className={`text-right font-medium ${['deposit', 'refund', 'consultation_credit'].includes(txn.type) ? "text-green-600" : "text-red-600"
+                                        <TableCell className={`text-right font-medium ${txn.amount > 0 ? "text-green-600" : "text-red-600"
                                             }`}>
-                                            {['deposit', 'refund', 'consultation_credit'].includes(txn.type) ? "+" : "-"}{Math.abs(txn.amount).toFixed(2)}
+                                            {txn.amount > 0 ? "+" : "-"}{Math.abs(txn.amount).toFixed(2)}
                                         </TableCell>
                                     </TableRow>
                                 ))

@@ -78,7 +78,8 @@ const AdminDoctors = () => {
     const newBalances: Record<string, number> = {};
 
     // 1. Local Defaults
-    users.forEach(u => {
+    const currentUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
+    currentUsers.forEach(u => {
       if (u.role === 'doctor') {
         newBalances[u.id] = u.balance || 0;
       }
@@ -94,8 +95,7 @@ const AdminDoctors = () => {
     setWalletBalances(newBalances);
   };
 
-  // Load balances on mount
-  // Load balances on mount and listen for updates
+  // Load balances on mount and listen for updates (run only once)
   useEffect(() => {
     fetchBalances();
 
@@ -109,6 +109,7 @@ const AdminDoctors = () => {
         console.log('[AdminDoctors] Reloading users from storage:', freshUsers.length);
         setUsers(freshUsers);
         setDoctors(freshDoctors);
+        fetchBalances();
       }
     };
 
@@ -125,7 +126,8 @@ const AdminDoctors = () => {
       channel.close();
       window.removeEventListener('localDataUpdate', handleLocalUpdate);
     };
-  }, [users]); // Re-fetch if users change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only once on mount — event listeners handle subsequent updates
 
   const [isOpen, setIsOpen] = useState(false);
   const [editing, setEditing] = useState<Doctor | null>(null);
@@ -154,13 +156,40 @@ const AdminDoctors = () => {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        toast.error("Image size too large. Please choose an image under 2MB.");
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("Image size too large. Please choose an image under 5MB.");
         return;
       }
+      // Resize and compress the image to avoid localStorage quota issues
       const reader = new FileReader();
       reader.onloadend = () => {
-        setForm(prev => ({ ...prev, image: reader.result as string }));
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_SIZE = 200; // max width/height in pixels
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_SIZE) {
+              height = Math.round((height * MAX_SIZE) / width);
+              width = MAX_SIZE;
+            }
+          } else {
+            if (height > MAX_SIZE) {
+              width = Math.round((width * MAX_SIZE) / height);
+              height = MAX_SIZE;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+          setForm(prev => ({ ...prev, image: compressedBase64 }));
+        };
+        img.src = reader.result as string;
       };
       reader.readAsDataURL(file);
     }
@@ -230,9 +259,13 @@ const AdminDoctors = () => {
       setData(STORAGE_KEYS.USERS, updatedUsers);
       toast.success(editing ? "Doctor updated!" : "Doctor created with credentials!");
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Save error:", error);
-      toast.error("Failed to save doctor. Image might be too large.");
+      if (error?.name === 'QuotaExceededError' || error?.code === 22) {
+        toast.error("Storage is full. Try using a smaller image or clearing browser data.");
+      } else {
+        toast.error("Failed to save doctor. Image might be too large for local storage.");
+      }
       return;
     }
 

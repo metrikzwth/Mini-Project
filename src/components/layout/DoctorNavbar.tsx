@@ -91,7 +91,7 @@ const DoctorNavbar = () => {
             <Link to="/doctor/wallet">
               <Button variant="outline" size="sm" className="hidden md:flex gap-2">
                 <Wallet className="w-4 h-4" />
-                <span>{balance} Credits</span>
+                <span>{Math.floor(balance)} Credits</span>
               </Button>
             </Link>
 

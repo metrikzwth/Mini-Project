@@ -1,4 +1,5 @@
 import AdminSidebar from "@/components/layout/AdminSidebar";
+import MedicineChatbot from "@/components/chatbot/MedicineChatbot";
 import {
   Card,
   CardContent,
@@ -12,91 +13,54 @@ import { Bot, Pill, AlertTriangle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const AdminChatbot = () => {
-  const medicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
-
   return (
     <div className="min-h-screen bg-background m-5">
       <AdminSidebar />
       <main className={cn("transition-all pt-16 lg:pt-0 lg:pl-64", "p-8")}>
-        <h1 className="text-3xl font-bold text-foreground mb-2">
-          Chatbot Knowledge Base
-        </h1>
-        <p className="text-muted-foreground mb-8">
-          Manage medicine information that powers the AI chatbot
-        </p>
+        <div className="max-w-4xl mx-auto text-center py-20">
+          <div className="bg-primary/10 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Bot className="w-10 h-10 text-primary" />
+          </div>
+          <h1 className="text-3xl font-bold text-foreground mb-4">
+            Interactive Chatbot Verification
+          </h1>
+          <p className="text-muted-foreground text-lg mb-8 max-w-xl mx-auto">
+            Use the chatbot widget in the bottom-right corner to test and verify AI responses.
+            <br />
+            This ensures accurate information delivery to patients.
+          </p>
 
-        <Card className="border-2 mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-warning" /> Disclaimer
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">
-              {chatbotKnowledge.disclaimer}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-2 mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Info className="w-5 h-5 text-info" /> General Tips
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-2">
-              {chatbotKnowledge.generalTips.map((tip, i) => (
-                <li
-                  key={i}
-                  className="flex items-start gap-2 text-muted-foreground"
-                >
-                  <span className="w-6 h-6 bg-info/10 rounded-full flex items-center justify-center text-xs font-bold text-info shrink-0">
-                    {i + 1}
-                  </span>
-                  {tip}
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-
-        <h2 className="text-xl font-bold text-foreground mb-4">
-          Medicine Knowledge
-        </h2>
-        <div className="grid md:grid-cols-2 gap-4">
-          {medicines.map((m) => (
-            <Card key={m.id} className="border-2">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Pill className="w-5 h-5 text-primary" /> {m.name}
-                </CardTitle>
-                <CardDescription>{m.category}</CardDescription>
+          <div className="grid gap-4 md:grid-cols-3 text-left max-w-3xl mx-auto mt-12">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Medicine Info</CardTitle>
               </CardHeader>
-              <CardContent className="text-sm space-y-2">
-                <div>
-                  <strong>Timing:</strong>{" "}
-                  <Badge variant="outline">
-                    {m.instructions.timing.replace("_", " ")}
-                  </Badge>
-                </div>
-                <div>
-                  <strong>Drink with:</strong> {m.instructions.drinkWith}
-                </div>
-                <div>
-                  <strong>Dosage:</strong> {m.instructions.dosageTiming}
-                </div>
-                {m.instructions.foodsToAvoid.length > 0 && (
-                  <div>
-                    <strong>Avoid:</strong>{" "}
-                    {m.instructions.foodsToAvoid.join(", ")}
-                  </div>
-                )}
+              <CardContent className="text-sm text-muted-foreground">
+                Ask about dosage, timing, and side effects of specific medicines.
               </CardContent>
             </Card>
-          ))}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Interactions</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground">
+                Verify warnings about food interactions (e.g., grapefruit, dairy).
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">General Health</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground">
+                Test general wellness advice and fallback responses.
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </main>
+
+      {/* The Chatbot Widget */}
+      <MedicineChatbot />
     </div>
   );
 };

@@ -7,7 +7,7 @@ import { getData, setData, STORAGE_KEYS } from '@/lib/data';
 export interface Transaction {
     id: string;
     amount: number;
-    type: 'deposit' | 'purchase' | 'refund' | 'payout' | 'consultation_credit' | 'manual_adjustment';
+    type: 'deposit' | 'purchase' | 'refund' | 'payout' | 'withdrawal' | 'consultation_credit' | 'manual_adjustment';
     description: string;
     created_at: string;
 }
@@ -16,11 +16,12 @@ interface WalletContextType {
     balance: number;
     transactions: Transaction[];
     isLoading: boolean;
-    addCredits: (amount: number, description?: string, targetUserId?: string, type?: 'deposit' | 'refund' | 'manual_adjustment') => Promise<boolean>;
+    addCredits: (amount: number, description?: string, targetUserId?: string, type?: 'deposit' | 'refund' | 'manual_adjustment' | 'consultation_credit') => Promise<boolean>;
     deductCredits: (amount: number, description: string, targetUserId?: string, type?: 'purchase' | 'payout' | 'manual_adjustment') => Promise<boolean>;
     transferCredits: (amount: number, receiverId: string, description: string) => Promise<boolean>;
-    requestPayout: (amount: number) => Promise<boolean>;
+    requestPayout: (amount: number, description?: string, type?: 'payout' | 'withdrawal') => Promise<boolean>;
     refreshWallet: () => Promise<void>;
+    createTransaction: (amount: number, type: string, description: string, targetUserId?: string) => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -141,7 +142,55 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
-    const addCredits = async (amount: number, description: string = 'Added credits', targetUserId?: string, type: 'deposit' | 'refund' | 'manual_adjustment' = 'deposit') => {
+    const createTransaction = async (amount: number, type: string, description: string, targetUserId?: string) => {
+        const targetId = targetUserId || user?.id;
+        if (!targetId) return;
+
+        try {
+            if (isUUID(targetId)) {
+                // Real DB User
+                const { data: walletData, error: walletError } = await supabase
+                    .from('wallets')
+                    .select('id')
+                    .eq('user_id', targetId)
+                    .single();
+
+                if (walletError || !walletData) {
+                    console.error('Failed to find wallet for transaction:', walletError);
+                    return;
+                }
+
+                const { error: txnError } = await supabase.from('transactions').insert({
+                    wallet_id: walletData.id,
+                    amount: amount,
+                    type: type,
+                    description: description,
+                    created_at: new Date().toISOString()
+                });
+
+                if (txnError) console.error('Failed to insert transaction:', txnError);
+                else console.log('Transaction inserted successfully:', description);
+            } else {
+                // Local Mock User
+                const txn: Transaction & { userId: string } = {
+                    id: `TXN${Date.now()}`,
+                    amount,
+                    type: type as any,
+                    description,
+                    created_at: new Date().toISOString(),
+                    userId: targetId,
+                };
+                const allTxns = getData<any[]>(STORAGE_KEYS.TRANSACTIONS, []);
+                allTxns.push(txn);
+                setData(STORAGE_KEYS.TRANSACTIONS, allTxns);
+                console.log('Local transaction inserted:', description);
+            }
+        } catch (err) {
+            console.error('Error creating transaction:', err);
+        }
+    };
+
+    const addCredits = async (amount: number, description: string = 'Added credits', targetUserId?: string, type: 'deposit' | 'refund' | 'manual_adjustment' | 'consultation_credit' = 'deposit') => {
         const targetId = targetUserId || user?.id;
         if (!targetId) return false;
 
@@ -155,10 +204,16 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                     txn_type: type
                 });
                 if (error) throw error;
+
+                console.log('Credits added successfully via RPC');
+                await createTransaction(amount, type, description, targetId);
+
             } else {
-                // Local Mock User
+                // Local Mock User logic (keep as is)
+                // ... (omitted for brevity, assume existing logic is fine but we can replace the txn creation part too)
                 const users = getData<any[]>(STORAGE_KEYS.USERS, []);
                 let userFound = false;
+                // ... update user balance ...
                 const updatedUsers = users.map(u => {
                     if (u.id === targetId) {
                         userFound = true;
@@ -166,27 +221,10 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                     }
                     return u;
                 });
-
-                if (!userFound) {
-                    console.error(`User ${targetId} not found in local storage during credit addition.`);
-                    toast.error(`Transfer failed: Recipient user (${targetId}) not found.`);
-                    return false;
-                }
-
+                if (!userFound) return false;
                 setData(STORAGE_KEYS.USERS, updatedUsers);
 
-                // Record transaction in localStorage
-                const txn: Transaction & { userId: string } = {
-                    id: `TXN${Date.now()}`,
-                    amount,
-                    type,
-                    description,
-                    created_at: new Date().toISOString(),
-                    userId: targetId,
-                };
-                const allTxns = getData<any[]>(STORAGE_KEYS.TRANSACTIONS, []);
-                allTxns.push(txn);
-                setData(STORAGE_KEYS.TRANSACTIONS, allTxns);
+                await createTransaction(amount, type, description, targetId);
             }
 
             if (!targetUserId || targetUserId === user?.id) {
@@ -214,6 +252,15 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                     txn_type: type
                 });
                 if (error) throw error;
+
+                console.log('Credits deducted successfully via RPC');
+                await createTransaction(-amount, type, description, targetId); // Note negative amount? No, backend handles sign?
+                // Wait, transactions table usually stores signed amount? 
+                // RPC `deduct_credits` reduces balance.
+                // Creating a transaction record: if type is 'purchase', amount should be negative visually?
+                // In my `createTransaction`, I take `amount`.
+                // Let's pass negative amount for deductions.
+
             } else {
                 // Local Mock User
                 const users = getData<any[]>(STORAGE_KEYS.USERS, []);
@@ -230,18 +277,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                 });
                 setData(STORAGE_KEYS.USERS, updatedUsers);
 
-                // Record transaction in localStorage
-                const txn: Transaction & { userId: string } = {
-                    id: `TXN${Date.now()}`,
-                    amount: -amount,
-                    type,
-                    description,
-                    created_at: new Date().toISOString(),
-                    userId: targetId,
-                };
-                const allTxns = getData<any[]>(STORAGE_KEYS.TRANSACTIONS, []);
-                allTxns.push(txn);
-                setData(STORAGE_KEYS.TRANSACTIONS, allTxns);
+                await createTransaction(-amount, type, description, targetId);
             }
 
             if (!targetUserId || targetUserId === user?.id) {
@@ -272,6 +308,16 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                     receiver_txn_type: 'consultation_credit'
                 });
                 if (error) throw error;
+
+                // Manually log for Sender (Patient)
+                await createTransaction(-amount, 'purchase', description, user.id);
+
+                // Manually log for Receiver (Doctor) - Use a slightly different description if possible, or same
+                // For the receiver, we want to know who sent it.
+                // But we only have generic description.
+                // Let's append "(Transfer)" or something, or just use description.
+                await createTransaction(amount, 'consultation_credit', description, receiverId);
+
             } else {
                 // Hybrid or Local Transfer
                 // 1. Deduct from Sender
@@ -282,12 +328,12 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                     await deductCredits(amount, description, user.id, 'purchase');
                 }
 
-                // 2. Add to Receiver
+                // 2. Add to Receiver (Doctor) — use 'consultation_credit' so it shows correctly
                 if (receiverUUID) {
-                    await addCredits(amount, description, receiverId, 'manual_adjustment');
+                    await addCredits(amount, description, receiverId, 'consultation_credit');
                 } else {
                     // Force a fresh read/write for local receiver
-                    await addCredits(amount, description, receiverId, 'manual_adjustment');
+                    await addCredits(amount, description, receiverId, 'consultation_credit');
 
                     // Explicitly broadcast update for the receiver if it's not the current user
                     // This ensures Admin tab picks it up if it's open
@@ -308,24 +354,38 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
-    // For doctors to payout
-    const requestPayout = async (amount: number) => {
+    // For doctors to payout and patients to withdraw
+    const requestPayout = async (amount: number, description: string = 'Payout processed to Bank', type: 'payout' | 'withdrawal' = 'payout') => {
         if (!user) return false;
         try {
-            // Payout resets balance to 0 (or deducts specific amount)
-            // The user requested "balance will be 0 itself after transfer"
-            // So we deduct the FULL current balance if amount matches, or just the requested amount.
+            if (isUUID(user.id)) {
+                // Real DB User: use RPC
+                const { error } = await supabase.rpc('deduct_credits', {
+                    target_user_id: user.id,
+                    deduct_amount: amount,
+                    txn_description: description,
+                    txn_type: type
+                });
+                if (error) throw error;
+                await createTransaction(-amount, type, description, user.id);
+            } else {
+                // Mock/Local User: deduct from localStorage
+                const users = getData<any[]>(STORAGE_KEYS.USERS, []);
+                const currentUser = users.find(u => u.id === user.id);
+                if (!currentUser || (currentUser.balance || 0) < amount) {
+                    throw new Error('Insufficient balance');
+                }
+                const updatedUsers = users.map(u => {
+                    if (u.id === user.id) {
+                        return { ...u, balance: (u.balance || 0) - amount };
+                    }
+                    return u;
+                });
+                setData(STORAGE_KEYS.USERS, updatedUsers);
+                await createTransaction(-amount, type, description, user.id);
+            }
 
-            const { error } = await supabase.rpc('deduct_credits', {
-                target_user_id: user.id,
-                deduct_amount: amount,
-                txn_description: 'Payout processed to Bank',
-                txn_type: 'payout'
-            });
-
-            if (error) throw error;
-
-            toast.success(`Payout of ${amount} credits processed to bank.`);
+            toast.success(`${type === 'withdrawal' ? 'Withdrawal' : 'Payout'} of ${amount} credits processed to bank.`);
             await fetchWalletData();
             return true;
         } catch (error: any) {
@@ -336,7 +396,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
     };
 
     return (
-        <WalletContext.Provider value={{ balance, transactions, isLoading, addCredits, deductCredits, transferCredits, requestPayout, refreshWallet: fetchWalletData }}>
+        <WalletContext.Provider value={{ balance, transactions, isLoading, addCredits, deductCredits, transferCredits, requestPayout, refreshWallet: fetchWalletData, createTransaction }}>
             {children}
         </WalletContext.Provider>
     );

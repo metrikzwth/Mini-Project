@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useWallet } from "@/contexts/WalletContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -19,12 +20,13 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-import { CreditCard, History, Wallet as WalletIcon } from "lucide-react";
+import { CreditCard, History, Wallet as WalletIcon, ArrowLeft } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 
 const PatientWallet = () => {
-    const { balance, transactions, addCredits, isLoading } = useWallet();
+    const navigate = useNavigate();
+    const { balance, transactions, addCredits, requestPayout, isLoading } = useWallet();
     const { user } = useAuth();
     const [amount, setAmount] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
@@ -49,10 +51,34 @@ const PatientWallet = () => {
         }, 1500);
     };
 
+    const handleWithdraw = async () => {
+        if (balance <= 0) {
+            toast.error("No funds available to withdraw");
+            return;
+        }
+        if (!confirm(`Are you sure you want to withdraw $${Math.floor(balance)} to your bank account?`)) return;
+
+        setIsProcessing(true);
+
+        // Simulate bank processing delay
+        setTimeout(async () => {
+            const success = await requestPayout(balance, 'Withdrawal to Bank', 'withdrawal');
+            setIsProcessing(false);
+            if (success) {
+                toast.success("Withdrawal successful! Funds will appear in your bank account in 2-3 business days.");
+            }
+        }, 1500);
+    };
+
     return (
         <div className="container mx-auto p-6 space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-3xl font-bold tracking-tight">My Wallet</h1>
+                <div className="flex items-center gap-4">
+                    <Button variant="outline" size="icon" onClick={() => navigate(-1)}>
+                        <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <h1 className="text-3xl font-bold tracking-tight">My Wallet</h1>
+                </div>
                 <div className="flex items-center gap-2 text-muted-foreground">
                     <WalletIcon className="w-5 h-5" />
                     <span>Wallet ID: {user?.id.slice(0, 8)}...</span>
@@ -66,11 +92,14 @@ const PatientWallet = () => {
                         <CardTitle className="text-lg font-medium opacity-90">Current Balance</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-4xl font-bold">{balance.toFixed(2)} Credits</div>
+                        <div className="text-4xl font-bold">{Math.floor(balance)} Credits</div>
                         <p className="text-sm opacity-80 mt-2">Use credits to pay for consultations and medicines.</p>
                     </CardContent>
                 </Card>
 
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2">
                 {/* Add Credits Card */}
                 <Card>
                     <CardHeader>
@@ -109,6 +138,30 @@ const PatientWallet = () => {
                         </form>
                     </CardContent>
                 </Card>
+
+                {/* Withdraw Funds Card */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Withdraw Funds</CardTitle>
+                        <CardDescription>Transfer your wallet balance to your bank account.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="space-y-4">
+                            <div className="p-4 bg-muted rounded-lg text-sm text-muted-foreground">
+                                <p>Available for withdrawal:</p>
+                                <p className="text-xl font-bold text-foreground">${Math.floor(balance)}</p>
+                            </div>
+                            <Button
+                                className="w-full"
+                                variant="outline"
+                                onClick={handleWithdraw}
+                                disabled={isProcessing || balance <= 0}
+                            >
+                                Withdraw All Funds
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
 
             {/* Transactions History */}
@@ -142,16 +195,16 @@ const PatientWallet = () => {
                                         <TableCell>{format(new Date(txn.created_at), "MMM d, yyyy h:mm a")}</TableCell>
                                         <TableCell className="capitalize">
                                             <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${['deposit', 'refund', 'consultation_credit'].includes(txn.type)
-                                                    ? "bg-green-100 text-green-800"
-                                                    : "bg-red-100 text-red-800"
+                                                ? "bg-green-100 text-green-800"
+                                                : "bg-red-100 text-red-800"
                                                 }`}>
                                                 {txn.type.replace(/_/g, ' ')}
                                             </span>
                                         </TableCell>
                                         <TableCell>{txn.description}</TableCell>
-                                        <TableCell className={`text-right font-medium ${['deposit', 'refund', 'consultation_credit'].includes(txn.type) ? "text-green-600" : "text-red-600"
+                                        <TableCell className={`text-right font-medium ${txn.amount > 0 ? "text-green-600" : "text-red-600"
                                             }`}>
-                                            {['deposit', 'refund', 'consultation_credit'].includes(txn.type) ? "+" : "-"}{Math.abs(txn.amount).toFixed(2)}
+                                            {txn.amount > 0 ? "+" : "-"}{Math.abs(txn.amount).toFixed(2)}
                                         </TableCell>
                                     </TableRow>
                                 ))

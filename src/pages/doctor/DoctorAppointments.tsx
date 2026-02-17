@@ -4,18 +4,26 @@ import { Button } from '@/components/ui/button';
 import DoctorNavbar from '@/components/layout/DoctorNavbar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
-import { getData, setData, STORAGE_KEYS, Appointment, User } from '@/lib/data';
+import { getData, setData, STORAGE_KEYS, Appointment, User, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
 import { syncAppointmentToSupabase, deleteAppointmentFromSupabase } from '@/lib/supabaseSync';
-import { Calendar, Clock, User as UserIcon, CheckCircle, XCircle, Trash2, Eraser } from 'lucide-react';
-import { useState } from 'react';
+import { Calendar, Clock, User as UserIcon, CheckCircle, XCircle, Trash2, Eraser, Video } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 const DoctorAppointments = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
-  const { addCredits, transferCredits } = useWallet();
-  const [appointments, setAppointments] = useState<Appointment[]>(
-    getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []).filter(a => a.doctorName === user?.name)
-  );
+  const { addCredits, deductCredits } = useWallet();
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+
+  useEffect(() => {
+    if (user) {
+      const hiddenIds = getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
+      const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
+      setAppointments(allApts.filter(a => a.doctorName === user.name && !hiddenIds.includes(a.id) && (a.status === 'pending' || a.status === 'confirmed')));
+    }
+  }, [user]);
   const users = getData<User[]>(STORAGE_KEYS.USERS, []);
 
   const updateStatus = async (id: string, status: Appointment['status']) => {
@@ -30,17 +38,26 @@ const DoctorAppointments = () => {
       // If the current user (Doctor) is the one cancelling, we should TRANSFER back to patient.
       // This maintains the closed loop economy.
       if (user?.id) {
-        // Attempt transfer first
-        success = await transferCredits(
+        // 1. Deduct from Doctor (Manual Adjustment to reflect refund given)
+        await deductCredits(
           appointmentToUpdate.fee,
+          `Refund issued to ${appointmentToUpdate.patientName}`,
+          user.id,
+          'manual_adjustment'
+        );
+
+        // 2. Add to Patient (Explicit REFUND type)
+        success = await addCredits(
+          appointmentToUpdate.fee,
+          `Refund for appointment with ${user.name}`,
           appointmentToUpdate.patientId,
-          `Refund for cancelled appointment with ${user?.name}`
+          'refund'
         );
       } else {
         // Fallback: System Refund (Minting)
         success = await addCredits(
           appointmentToUpdate.fee,
-          `Refund for cancelled appointment with ${user?.name}`,
+          `Refund for cancelled appointment with ${user.name}`,
           appointmentToUpdate.patientId,
           'refund'
         );
@@ -58,30 +75,25 @@ const DoctorAppointments = () => {
     setData(STORAGE_KEYS.APPOINTMENTS, updated);
     const updatedAppt = updated.find(a => a.id === id);
     if (updatedAppt) syncAppointmentToSupabase(updatedAppt);
-    setAppointments(updated.filter(a => a.doctorName === user?.name));
+    setAppointments(updated.filter(a => a.doctorName === user?.name && (a.status === 'pending' || a.status === 'confirmed')));
     toast.success(`Appointment ${status}`);
   };
 
-  // DELETE individual appointment
+  // HIDE individual appointment (soft-delete — only hides for this user)
   const handleDeleteAppointment = (aptId: string) => {
     if (!confirm('Remove this appointment from your list?')) return;
-    const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-    const updated = allApts.filter(a => a.id !== aptId);
-    setData(STORAGE_KEYS.APPOINTMENTS, updated);
-    deleteAppointmentFromSupabase(aptId);
-    setAppointments(updated.filter(a => a.doctorName === user?.name));
-    toast.success('Appointment removed');
+    hideItemForUser(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', aptId);
+    setAppointments(prev => prev.filter(a => a.id !== aptId));
+    toast.success('Appointment removed from your list');
   };
 
-  // CLEAR all appointments
+  // CLEAR all appointments (soft-delete — only hides for this user)
   const handleClearAllAppointments = () => {
     if (!confirm(`Clear all ${appointments.length} appointments? This cannot be undone.`)) return;
-    const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-    const otherApts = allApts.filter(a => a.doctorName !== user?.name);
-    setData(STORAGE_KEYS.APPOINTMENTS, otherApts);
-    appointments.forEach(a => deleteAppointmentFromSupabase(a.id));
+    const ids = appointments.map(a => a.id);
+    clearHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', ids);
     setAppointments([]);
-    toast.success('All appointments cleared');
+    toast.success('All appointments cleared from your list');
   };
 
   return (
@@ -119,6 +131,7 @@ const DoctorAppointments = () => {
                   </div>
                   <div className="flex items-center gap-3">
                     <Badge>{apt.status}</Badge>
+                    <Badge variant="outline" className="text-xs">{apt.type === 'video' ? '📹 Video' : '🏥 In-Person'}</Badge>
                     {apt.status === 'pending' && (
                       <>
                         <Button size="sm" onClick={() => updateStatus(apt.id, 'confirmed')}>
@@ -128,6 +141,18 @@ const DoctorAppointments = () => {
                           <XCircle className="w-4 h-4 mr-1" /> Cancel
                         </Button>
                       </>
+                    )}
+                    {apt.status === 'confirmed' && (
+                      <div className="flex gap-2">
+                        {apt.type === 'video' && (
+                          <Button size="sm" onClick={() => navigate('/doctor/consultation', { state: { appointmentId: apt.id } })}>
+                            <Video className="w-4 h-4 mr-1" /> Video Call
+                          </Button>
+                        )}
+                        <Button size="sm" variant="secondary" onClick={() => updateStatus(apt.id, 'completed')}>
+                          <CheckCircle className="w-4 h-4 mr-1" /> Mark Completed
+                        </Button>
+                      </div>
                     )}
                     <Button
                       variant="ghost"
@@ -146,8 +171,8 @@ const DoctorAppointments = () => {
             <p className="text-center py-16 text-muted-foreground">No appointments scheduled</p>
           )}
         </div>
-      </main>
-    </div>
+      </main >
+    </div >
   );
 };
 

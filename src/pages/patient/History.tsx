@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
-import { getData, setData, STORAGE_KEYS, Order, Prescription, Appointment } from '@/lib/data';
+import { getData, setData, STORAGE_KEYS, Order, Prescription, Appointment, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
 import { syncOrderStatusToSupabase, deleteOrderFromSupabase, deleteAppointmentFromSupabase } from '@/lib/supabaseSync';
 import {
   Package,
@@ -32,16 +32,40 @@ const History = () => {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [, forceUpdate] = useState(0);
 
+  // Listen for real-time updates (from Doctor portal)
+  useEffect(() => {
+    // 1. Local storage event (same tab/window)
+    const handleUpdate = () => forceUpdate(n => n + 1);
+    window.addEventListener('localDataUpdate', handleUpdate);
+
+    // 2. Broadcast channel (cross-tab)
+    const channel = new BroadcastChannel('medicare_data_updates');
+    channel.onmessage = (event) => {
+      console.log('[History] Received broadcast update:', event.data);
+      if (event.data.type === 'update') {
+        handleUpdate();
+      }
+    };
+
+    return () => {
+      window.removeEventListener('localDataUpdate', handleUpdate);
+      channel.close();
+    };
+  }, []);
+
+  const hiddenOrderIds = getHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, user?.id || '');
   const orders = getData<Order[]>(STORAGE_KEYS.ORDERS, [])
-    .filter(o => o.patientId === user?.id)
+    .filter(o => o.patientId === user?.id && !hiddenOrderIds.includes(o.id))
     .sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
 
+  const hiddenRxIds = getHiddenItems(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user?.id || '');
   const prescriptions = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, [])
-    .filter(p => p.patientId === user?.id)
+    .filter(p => p.patientId === user?.id && !hiddenRxIds.includes(p.id))
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+  const hiddenAptIds = getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '');
   const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
-    .filter(a => a.patientId === user?.id)
+    .filter(a => a.patientId === user?.id && !hiddenAptIds.includes(a.id))
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const handleCancelOrder = async (order: Order) => {
@@ -75,47 +99,54 @@ const History = () => {
     forceUpdate(n => n + 1);
   };
 
-  // DELETE individual order (removes from history)
+  // HIDE individual order (soft-delete — only affects this user)
   const handleDeleteOrder = (orderId: string) => {
     if (!confirm('Remove this order from your history?')) return;
-    const allOrders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
-    const updated = allOrders.filter(o => o.id !== orderId);
-    setData(STORAGE_KEYS.ORDERS, updated);
-    deleteOrderFromSupabase(orderId);
+    hideItemForUser(STORAGE_KEYS.HIDDEN_ORDERS, user?.id || '', orderId);
     toast.success('Order removed from history');
     forceUpdate(n => n + 1);
   };
 
-  // CLEAR all orders
+  // CLEAR all orders (soft-delete — only affects this user)
   const handleClearAllOrders = () => {
     if (!confirm(`Clear all ${orders.length} orders from your history? This cannot be undone.`)) return;
-    const allOrders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
-    const otherOrders = allOrders.filter(o => o.patientId !== user?.id);
-    setData(STORAGE_KEYS.ORDERS, otherOrders);
-    orders.forEach(o => deleteOrderFromSupabase(o.id));
+    const ids = orders.map(o => o.id);
+    clearHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, user?.id || '', ids);
     toast.success('Order history cleared');
     forceUpdate(n => n + 1);
   };
 
-  // DELETE individual appointment
+  // HIDE individual appointment (soft-delete — only affects this user)
   const handleDeleteAppointment = (aptId: string) => {
     if (!confirm('Remove this appointment from your history?')) return;
-    const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-    const updated = allApts.filter(a => a.id !== aptId);
-    setData(STORAGE_KEYS.APPOINTMENTS, updated);
-    deleteAppointmentFromSupabase(aptId);
+    hideItemForUser(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', aptId);
     toast.success('Appointment removed from history');
     forceUpdate(n => n + 1);
   };
 
-  // CLEAR all appointments
+  // CLEAR all appointments (soft-delete — only affects this user)
   const handleClearAllAppointments = () => {
     if (!confirm(`Clear all ${appointments.length} appointments from your history? This cannot be undone.`)) return;
-    const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-    const otherApts = allApts.filter(a => a.patientId !== user?.id);
-    setData(STORAGE_KEYS.APPOINTMENTS, otherApts);
-    appointments.forEach(a => deleteAppointmentFromSupabase(a.id));
+    const ids = appointments.map(a => a.id);
+    clearHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', ids);
     toast.success('Appointment history cleared');
+    forceUpdate(n => n + 1);
+  };
+
+  // HIDE individual prescription (soft-delete — only affects this user)
+  const handleDeletePrescription = (rxId: string) => {
+    if (!confirm('Remove this prescription from your history?')) return;
+    hideItemForUser(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user?.id || '', rxId);
+    toast.success('Prescription removed from history');
+    forceUpdate(n => n + 1);
+  };
+
+  // CLEAR all prescriptions (soft-delete — only affects this user)
+  const handleClearAllPrescriptions = () => {
+    if (!confirm(`Clear all ${prescriptions.length} prescriptions from your history? This cannot be undone.`)) return;
+    const ids = prescriptions.map(r => r.id);
+    clearHiddenItems(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user?.id || '', ids);
+    toast.success('Prescription history cleared');
     forceUpdate(n => n + 1);
   };
 
@@ -270,17 +301,43 @@ const History = () => {
           <TabsContent value="prescriptions">
             {prescriptions.length > 0 ? (
               <div className="space-y-4">
+                <div className="flex justify-end">
+                  <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10" onClick={handleClearAllPrescriptions}>
+                    <Eraser className="w-4 h-4 mr-1" /> Clear All Prescriptions
+                  </Button>
+                </div>
                 {prescriptions.map((rx) => (
                   <Card key={rx.id} className="border-2">
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
                         <div>
                           <CardTitle className="text-lg">{rx.diagnosis}</CardTitle>
-                          <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                            <User className="w-4 h-4" /> {rx.doctorName}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground mt-1">
+                            <span className="flex items-center gap-1">
+                              <User className="w-4 h-4" /> Dr. {rx.doctorName.replace(/^Dr\.?\s*/i, '')}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-4 h-4" /> {rx.date}
+                            </span>
+                            {rx.consultationTime && (
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-4 h-4" /> {rx.consultationTime}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-sm text-muted-foreground">{rx.date}</p>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs">Rx #{rx.id.replace('RX', '').slice(-6)}</Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeletePrescription(rx.id)}
+                            className="h-7 px-2 text-muted-foreground hover:text-destructive"
+                            title="Delete prescription"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent>
