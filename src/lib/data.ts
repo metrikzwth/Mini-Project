@@ -40,6 +40,9 @@ export interface Appointment {
   status: "pending" | "confirmed" | "completed" | "cancelled";
   type: "video" | "in-person";
   notes?: string;
+  paymentMethod?: "wallet" | "cod";
+  transactionId?: string; // If paid by wallet
+  fee?: number;
 }
 
 export interface Order {
@@ -56,6 +59,8 @@ export interface Order {
   status: "Pending" | "Processing" | "Shipped" | "Delivered" | "Cancelled";
   orderDate: string;
   deliveryAddress: string;
+  paymentMethod?: "wallet" | "cod";
+  transactionId?: string;
 }
 
 export interface Prescription {
@@ -83,6 +88,8 @@ export interface User {
   role: "patient" | "doctor" | "admin";
   phone?: string;
   address?: string;
+  image?: string;
+  balance?: number;
 }
 
 // Initial mock data
@@ -196,7 +203,7 @@ export const initialMedicines: Medicine[] = [
 
 export const initialDoctors: Doctor[] = [
   {
-    id: "1",
+    id: "d1",
     name: "Dr. Sarah Johnson",
     specialization: "General Physician",
     experience: 12,
@@ -207,7 +214,7 @@ export const initialDoctors: Doctor[] = [
     isActive: true,
   },
   {
-    id: "2",
+    id: "d2",
     name: "Dr. Michael Chen",
     specialization: "Cardiologist",
     experience: 15,
@@ -218,7 +225,7 @@ export const initialDoctors: Doctor[] = [
     isActive: true,
   },
   {
-    id: "3",
+    id: "d3",
     name: "Dr. Emily Williams",
     specialization: "Dermatologist",
     experience: 8,
@@ -229,7 +236,7 @@ export const initialDoctors: Doctor[] = [
     isActive: true,
   },
   {
-    id: "4",
+    id: "d4",
     name: "Dr. James Anderson",
     specialization: "Pediatrician",
     experience: 10,
@@ -240,7 +247,7 @@ export const initialDoctors: Doctor[] = [
     isActive: true,
   },
   {
-    id: "5",
+    id: "d5",
     name: "Dr. Lisa Martinez",
     specialization: "Neurologist",
     experience: 18,
@@ -283,6 +290,27 @@ export const initialUsers: User[] = [
     email: "drchen@test.com",
     password: "chen123",
     name: "Dr. Michael Chen",
+    role: "doctor",
+  },
+  {
+    id: "d3",
+    email: "emily@test.com",
+    password: "emily123",
+    name: "Dr. Emily Williams",
+    role: "doctor",
+  },
+  {
+    id: "d4",
+    email: "james@test.com",
+    password: "james123",
+    name: "Dr. James Anderson",
+    role: "doctor",
+  },
+  {
+    id: "d5",
+    email: "lisa@test.com",
+    password: "lisa123",
+    name: "Dr. Lisa Martinez",
     role: "doctor",
   },
   {
@@ -342,8 +370,17 @@ export const getData = <T>(key: string, defaultValue: T): T => {
   return defaultValue;
 };
 
+// Create a broadcast channel for cross-tab communication
+export const dataChannel = new BroadcastChannel('medicare_data_updates');
+
 export const setData = <T>(key: string, value: T): void => {
+  console.log(`[data.ts] setData called for key: ${key}`);
   localStorage.setItem(key, JSON.stringify(value));
+  // Dispatch local event for current tab
+  window.dispatchEvent(new Event('localDataUpdate'));
+  // Broadcast to other tabs
+  console.log(`[data.ts] Broadcasting update for ${key}`);
+  dataChannel.postMessage({ type: 'update', key });
 };
 
 // Initialize data if not present
@@ -354,9 +391,26 @@ export const initializeData = () => {
   if (!localStorage.getItem(STORAGE_KEYS.DOCTORS)) {
     setData(STORAGE_KEYS.DOCTORS, initialDoctors);
   }
-  if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
+
+  // Logic to ensure default users always exist (Fix for missing credentials)
+  const existingUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
+  if (existingUsers.length === 0) {
     setData(STORAGE_KEYS.USERS, initialUsers);
+  } else {
+    // Merge: Add initialUsers if they don't exist in storage
+    let updatedUsers = [...existingUsers];
+    let hasChanges = false;
+    initialUsers.forEach(initUser => {
+      if (!updatedUsers.some(u => u.email === initUser.email)) {
+        updatedUsers.push(initUser);
+        hasChanges = true;
+      }
+    });
+    if (hasChanges) {
+      setData(STORAGE_KEYS.USERS, updatedUsers);
+    }
   }
+
   if (!localStorage.getItem(STORAGE_KEYS.APPOINTMENTS)) {
     setData(STORAGE_KEYS.APPOINTMENTS, []);
   }

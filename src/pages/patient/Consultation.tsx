@@ -5,13 +5,13 @@ import { Badge } from '@/components/ui/badge';
 import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
-import { getData, STORAGE_KEYS, Appointment } from '@/lib/data';
-import { 
-  Video, 
-  Mic, 
-  MicOff, 
-  VideoOff, 
-  Phone, 
+import { getData, STORAGE_KEYS, Appointment, Doctor } from '@/lib/data';
+import {
+  Video,
+  Mic,
+  MicOff,
+  VideoOff,
+  Phone,
   MessageSquare,
   User,
   Clock,
@@ -28,6 +28,10 @@ const Consultation = () => {
 
   const confirmedAppointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
     .filter(a => a.patientId === user?.id && a.status === 'confirmed');
+
+  const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
+  const activeAppointment = confirmedAppointments[0];
+  const activeDoctor = activeAppointment ? doctors.find(d => d.id === activeAppointment.doctorId) : null;
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -60,7 +64,7 @@ const Consultation = () => {
   return (
     <div className="min-h-screen bg-background">
       <PatientNavbar />
-      
+
       <main className="container mx-auto px-4 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">Video Consultation</h1>
@@ -77,12 +81,17 @@ const Consultation = () => {
                 {isInCall ? (
                   <>
                     {/* Doctor's Video (Main) */}
+                    {/* Doctor's Video (Main) */}
                     <div className="absolute inset-0 flex items-center justify-center bg-muted">
-                      <div className="w-32 h-32 bg-secondary/20 rounded-full flex items-center justify-center">
-                        <User className="w-16 h-16 text-secondary" />
+                      <div className="w-32 h-32 bg-secondary/20 rounded-full flex items-center justify-center overflow-hidden border">
+                        {activeDoctor?.image && activeDoctor.image !== '/placeholder.svg' ? (
+                          <img src={activeDoctor.image} alt={activeDoctor.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <User className="w-16 h-16 text-secondary" />
+                        )}
                       </div>
                       <Badge className="absolute top-4 left-4 bg-secondary">
-                        Dr. Sarah Johnson
+                        {activeDoctor?.name || 'Doctor'}
                       </Badge>
                     </div>
 
@@ -97,7 +106,11 @@ const Consultation = () => {
                         </div>
                       ) : (
                         <div className="w-full h-full flex items-center justify-center bg-primary/10">
-                          <User className="w-8 h-8 text-primary" />
+                          {user?.image ? (
+                            <img src={user.image} alt="Me" className="w-full h-full object-cover" />
+                          ) : (
+                            <User className="w-8 h-8 text-primary" />
+                          )}
                         </div>
                       )}
                     </div>
@@ -135,7 +148,7 @@ const Consultation = () => {
                       >
                         {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
                       </Button>
-                      
+
                       <Button
                         size="lg"
                         className="rounded-full w-16 h-16 bg-destructive hover:bg-destructive/90"
@@ -143,7 +156,7 @@ const Consultation = () => {
                       >
                         <Phone className="w-6 h-6 rotate-[135deg]" />
                       </Button>
-                      
+
                       <Button
                         variant="outline"
                         size="lg"
@@ -157,8 +170,8 @@ const Consultation = () => {
                       </Button>
                     </>
                   ) : (
-                    <Button 
-                      size="lg" 
+                    <Button
+                      size="lg"
                       className="px-8"
                       onClick={startCall}
                       disabled={confirmedAppointments.length === 0}

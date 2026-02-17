@@ -1,41 +1,75 @@
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useWallet } from '@/contexts/WalletContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import DoctorNavbar from '@/components/layout/DoctorNavbar';
-import { getData, STORAGE_KEYS, Appointment } from '@/lib/data';
-import { Calendar, Video, FileText, Users, Clock } from 'lucide-react';
+import { getData, STORAGE_KEYS, Appointment, Doctor, User } from '@/lib/data';
+import { Calendar, Video, FileText, Users, Clock, Wallet } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { supabase } from '@/lib/supabase';
+
 
 const DoctorDashboard = () => {
   const { user } = useAuth();
+  // Replace manual fetch with Context
+  const { balance } = useWallet();
+
+  // Get doctor data for image
+  const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
+  const currentDoctor = doctors.find(d => d.id === user?.id);
+
   const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
     .filter(a => a.doctorName === user?.name);
+  const users = getData<User[]>(STORAGE_KEYS.USERS, []);
 
   const todayAppointments = appointments.filter(a => a.status === 'confirmed' || a.status === 'pending');
   const completedToday = appointments.filter(a => a.status === 'completed').length;
 
+  // Removed manual useEffect fetch
+
   const stats = [
+    { label: 'Wallet Balance', value: `$${balance.toFixed(2)}`, icon: Wallet, color: 'bg-green-500' },
     { label: 'Today\'s Appointments', value: todayAppointments.length, icon: Calendar, color: 'bg-primary' },
     { label: 'Completed', value: completedToday, icon: FileText, color: 'bg-secondary' },
     { label: 'Total Patients', value: new Set(appointments.map(a => a.patientId)).size, icon: Users, color: 'bg-accent' },
   ];
 
+  const { refreshWallet } = useWallet(); // Get refresh function
+
   return (
     <div className="min-h-screen bg-background">
       <DoctorNavbar />
       <main className="container mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold text-foreground mb-2">Welcome, {user?.name}! 👋</h1>
-        <p className="text-muted-foreground mb-8">Here's your schedule overview</p>
+        <div className="flex items-center gap-4 mb-2">
+          {currentDoctor?.image && currentDoctor.image !== '/placeholder.svg' ? (
+            <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-primary">
+              <img src={currentDoctor.image} alt="Profile" className="w-full h-full object-cover" />
+            </div>
+          ) : null}
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.name}! 👋</h1>
+            <div className="flex items-center gap-3">
+              <p className="text-muted-foreground">Here's your schedule overview</p>
+              <button onClick={() => refreshWallet()} className="text-xs bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors">
+                Refresh Data
+              </button>
+            </div>
+          </div>
+        </div>
 
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
+        <div className="mb-8"></div>
+        {/* Spacer replaced the old <p> margin */}
+
+        <div className="grid md:grid-cols-4 gap-6 mb-8">
           {stats.map((stat, i) => (
             <Card key={i} className="border-2">
               <CardContent className="p-6 flex items-center gap-4">
                 <div className={`w-14 h-14 ${stat.color} rounded-xl flex items-center justify-center`}>
-                  <stat.icon className="w-7 h-7 text-primary-foreground" />
+                  <stat.icon className="w-7 h-7 text-white" />
                 </div>
                 <div>
-                  <p className="text-3xl font-bold text-foreground">{stat.value}</p>
+                  <p className="text-2xl font-bold text-foreground">{stat.value}</p>
                   <p className="text-sm text-muted-foreground">{stat.label}</p>
                 </div>
               </CardContent>
@@ -50,20 +84,32 @@ const DoctorDashboard = () => {
           <CardContent>
             {todayAppointments.length > 0 ? (
               <div className="space-y-4">
-                {todayAppointments.slice(0, 5).map((apt) => (
-                  <div key={apt.id} className="flex items-center justify-between p-4 bg-muted rounded-lg">
-                    <div>
-                      <p className="font-medium text-foreground">{apt.patientName}</p>
-                      <p className="text-sm text-muted-foreground">{apt.date} at {apt.time}</p>
+                {todayAppointments.slice(0, 5).map((apt) => {
+                  const patient = users.find(u => u.id === apt.patientId);
+                  return (
+                    <div key={apt.id} className="flex items-center justify-between p-4 bg-muted rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center overflow-hidden border">
+                          {patient?.image ? (
+                            <img src={patient.image} alt="Patient" className="w-full h-full object-cover" />
+                          ) : (
+                            <Users className="w-5 h-5 text-primary" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">{apt.patientName}</p>
+                          <p className="text-sm text-muted-foreground">{apt.date} at {apt.time}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Badge>{apt.status}</Badge>
+                        <Link to="/doctor/consultation">
+                          <Video className="w-5 h-5 text-primary cursor-pointer" />
+                        </Link>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <Badge>{apt.status}</Badge>
-                      <Link to="/doctor/consultation">
-                        <Video className="w-5 h-5 text-primary cursor-pointer" />
-                      </Link>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="text-center py-8 text-muted-foreground">No upcoming appointments</p>

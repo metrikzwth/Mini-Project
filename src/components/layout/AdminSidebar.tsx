@@ -1,13 +1,13 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { 
-  LayoutDashboard, 
-  Pill, 
-  UserCog, 
-  Calendar, 
-  Package, 
-  Bot, 
+import {
+  LayoutDashboard,
+  Pill,
+  UserCog,
+  Calendar,
+  Package,
+  Bot,
   LogOut,
   Menu,
   X,
@@ -25,15 +25,17 @@ const AdminSidebar = () => {
 
   const handleLogout = () => {
     logout();
-    navigate('/admin/login');
+    navigate('/login/admin');
   };
 
   const navLinks = [
     { path: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/admin/medicines', label: 'Medicines', icon: Pill },
     { path: '/admin/doctors', label: 'Doctors', icon: UserCog },
+    { path: '/admin/patients', label: 'Patients', icon: UserCog },
     { path: '/admin/appointments', label: 'Appointments', icon: Calendar },
     { path: '/admin/orders', label: 'Orders', icon: Package },
+    { path: '/admin/wallets', label: 'Wallets', icon: LayoutDashboard }, // Using LayoutDashboard for now, could use Wallet icon
     { path: '/admin/chatbot', label: 'Chatbot KB', icon: Bot },
   ];
 
@@ -67,8 +69,8 @@ const AdminSidebar = () => {
               onClick={() => setIsMobileOpen(false)}
               className={cn(
                 'flex items-center gap-3 px-3 py-3 rounded-lg transition-colors',
-                isActive 
-                  ? 'bg-sidebar-accent text-sidebar-accent-foreground' 
+                isActive
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                   : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                 isCollapsed && "justify-center"
               )}
@@ -126,7 +128,7 @@ const AdminSidebar = () => {
 
       {/* Mobile Sidebar Overlay */}
       {isMobileOpen && (
-        <div 
+        <div
           className="lg:hidden fixed inset-0 bg-foreground/50 z-40"
           onClick={() => setIsMobileOpen(false)}
         />

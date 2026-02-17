@@ -1,6 +1,8 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCart } from '@/contexts/CartContext';
+import { useWallet } from '@/contexts/WalletContext';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -9,38 +11,112 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { 
-  ShoppingCart, 
-  User, 
-  LogOut, 
-  Home, 
-  Pill, 
-  Calendar, 
-  FileText, 
+import {
+  ShoppingCart,
+  User as UserIcon,
+  LogOut,
+  Home,
+  Pill,
+  Calendar,
+  FileText,
   Menu,
   X,
-  Stethoscope
+  Stethoscope,
+  Wallet,
+  Settings
 } from 'lucide-react';
-import { useState } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import { cn } from '@/lib/utils';
+import { getData, setData, STORAGE_KEYS, User } from "@/lib/data";
+
 
 const PatientNavbar = () => {
   const { user, logout } = useAuth();
   const { totalItems } = useCart();
+  const { balance } = useWallet();
   const location = useLocation();
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    name: user?.name || '',
+    phone: user?.phone || '',
+    address: user?.address || '',
+    image: user?.image || ''
+  });
 
   const handleLogout = () => {
     logout();
     navigate('/');
   };
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error("Image size too large. Please choose an image under 2MB.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfileForm(prev => ({ ...prev, image: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleProfileUpdate = () => {
+    if (!user) return;
+
+    const allUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
+    let updatedUserVal: User | null = null;
+
+    const updatedUsers = allUsers.map(u => {
+      if (u.id === user.id) {
+        updatedUserVal = {
+          ...u,
+          name: profileForm.name,
+          phone: profileForm.phone,
+          address: profileForm.address,
+          image: profileForm.image
+        };
+        return updatedUserVal;
+      }
+      return u;
+    });
+
+    if (updatedUserVal) {
+      try {
+        setData(STORAGE_KEYS.USERS, updatedUsers);
+        setData(STORAGE_KEYS.CURRENT_USER, updatedUserVal);
+        toast.success("Profile updated successfully!");
+        setIsProfileOpen(false);
+        window.location.reload();
+      } catch (error) {
+        console.error("Storage error:", error);
+        toast.error("Failed to save profile. Image might be too large for local storage.");
+      }
+    } else {
+      toast.error("User record not found to update.");
+    }
+  };
+
+
   const navLinks = [
     { path: '/patient/dashboard', label: 'Dashboard', icon: Home },
     { path: '/patient/medicines', label: 'Medicines', icon: Pill },
     { path: '/patient/appointments', label: 'Appointments', icon: Calendar },
     { path: '/patient/history', label: 'History', icon: FileText },
+    { path: '/patient/wallet', label: 'Wallet', icon: Wallet },
   ];
 
   return (
@@ -66,8 +142,8 @@ const PatientNavbar = () => {
                   to={link.path}
                   className={cn(
                     'flex items-center gap-2 px-4 py-2 rounded-lg transition-colors',
-                    isActive 
-                      ? 'bg-primary text-primary-foreground' 
+                    isActive
+                      ? 'bg-primary text-primary-foreground'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                   )}
                 >
@@ -80,6 +156,14 @@ const PatientNavbar = () => {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-3">
+            {/* Wallet Balance Display */}
+            <Link to="/patient/wallet">
+              <Button variant="outline" size="sm" className="hidden md:flex gap-2">
+                <Wallet className="w-4 h-4" />
+                <span>{balance} Credits</span>
+              </Button>
+            </Link>
+
             {/* Cart */}
             <Link to="/patient/cart" className="relative">
               <Button variant="ghost" size="icon">
@@ -95,8 +179,12 @@ const PatientNavbar = () => {
             {/* User Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full">
-                  <User className="w-5 h-5" />
+                <Button variant="ghost" size="icon" className="rounded-full overflow-hidden">
+                  {user?.image ? (
+                    <img src={user.image} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <UserIcon className="w-5 h-5" />
+                  )}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 bg-popover">
@@ -105,6 +193,18 @@ const PatientNavbar = () => {
                   <p className="text-sm text-muted-foreground">{user?.email}</p>
                 </div>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => {
+                  setProfileForm({
+                    name: user?.name || '',
+                    phone: user?.phone || '',
+                    address: user?.address || '',
+                    image: user?.image || ''
+                  });
+                  setIsProfileOpen(true);
+                }} className="cursor-pointer">
+                  <Settings className="w-4 h-4 mr-2" />
+                  Profile Settings
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
                   <LogOut className="w-4 h-4 mr-2" />
                   Logout
@@ -113,9 +213,9 @@ const PatientNavbar = () => {
             </DropdownMenu>
 
             {/* Mobile Menu Toggle */}
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               className="md:hidden"
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             >
@@ -137,8 +237,8 @@ const PatientNavbar = () => {
                   onClick={() => setIsMobileMenuOpen(false)}
                   className={cn(
                     'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
-                    isActive 
-                      ? 'bg-primary text-primary-foreground' 
+                    isActive
+                      ? 'bg-primary text-primary-foreground'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                   )}
                 >
@@ -149,6 +249,62 @@ const PatientNavbar = () => {
             })}
           </div>
         )}
+
+        <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Profile</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="flex justify-center mb-4">
+                <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-primary bg-muted flex items-center justify-center">
+                  {profileForm.image ? (
+                    <img src={profileForm.image} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <UserIcon className="w-12 h-12 text-muted-foreground" />
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Full Name</Label>
+                <Input value={profileForm.name} onChange={e => setProfileForm({ ...profileForm, name: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Profile ID / Pass Photo</Label>
+                <div className="flex items-center gap-4">
+                  <Input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    className="cursor-pointer"
+                  />
+                  {profileForm.image && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setProfileForm(prev => ({ ...prev, image: '' }))}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">Upload a clear photo to verify your identity.</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Phone</Label>
+                <Input value={profileForm.phone} onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Address</Label>
+                <Input value={profileForm.address} onChange={e => setProfileForm({ ...profileForm, address: e.target.value })} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={handleProfileUpdate}>Save Changes</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </nav>
   );

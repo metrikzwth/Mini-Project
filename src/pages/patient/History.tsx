@@ -1,44 +1,130 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
-import { getData, STORAGE_KEYS, Order, Prescription, Appointment } from '@/lib/data';
-import { 
-  Package, 
-  FileText, 
+import { useWallet } from '@/contexts/WalletContext';
+import { getData, setData, STORAGE_KEYS, Order, Prescription, Appointment } from '@/lib/data';
+import { syncOrderStatusToSupabase, deleteOrderFromSupabase, deleteAppointmentFromSupabase } from '@/lib/supabaseSync';
+import {
+  Package,
+  FileText,
   Calendar,
   Clock,
   MapPin,
   Pill,
-  User
+  User,
+  XCircle,
+  Loader2,
+  Trash2,
+  Eraser
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 const History = () => {
   const { user } = useAuth();
-  
+  const { addCredits } = useWallet();
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [, forceUpdate] = useState(0);
+
   const orders = getData<Order[]>(STORAGE_KEYS.ORDERS, [])
     .filter(o => o.patientId === user?.id)
     .sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
-    
+
   const prescriptions = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, [])
     .filter(p => p.patientId === user?.id)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    
+
   const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
     .filter(a => a.patientId === user?.id)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const statusColors = {
-    pending: 'bg-warning/10 text-warning border-warning/20',
-    processing: 'bg-info/10 text-info border-info/20',
-    shipped: 'bg-primary/10 text-primary border-primary/20',
-    delivered: 'bg-secondary/10 text-secondary border-secondary/20',
-    cancelled: 'bg-destructive/10 text-destructive border-destructive/20',
+  const handleCancelOrder = async (order: Order) => {
+    if (!confirm(`Are you sure you want to cancel Order #${order.id.slice(-6)}?`)) return;
+
+    setCancellingId(order.id);
+
+    // Simulate processing
+    await new Promise(resolve => setTimeout(resolve, 800));
+
+    // Update order status in storage
+    const allOrders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
+    const updatedOrders = allOrders.map(o => {
+      if (o.id === order.id) {
+        return { ...o, status: "Cancelled" as const };
+      }
+      return o;
+    });
+    setData(STORAGE_KEYS.ORDERS, updatedOrders);
+    syncOrderStatusToSupabase(order.id, 'Cancelled');
+
+    // Refund if paid via wallet
+    if (order.paymentMethod === 'wallet') {
+      await addCredits(order.total, `Refund: Order #${order.id.slice(-6)} cancelled`);
+      toast.success(`Order cancelled — $${order.total.toFixed(2)} refunded to wallet`);
+    } else {
+      toast.success('Order cancelled successfully');
+    }
+
+    setCancellingId(null);
+    forceUpdate(n => n + 1);
+  };
+
+  // DELETE individual order (removes from history)
+  const handleDeleteOrder = (orderId: string) => {
+    if (!confirm('Remove this order from your history?')) return;
+    const allOrders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
+    const updated = allOrders.filter(o => o.id !== orderId);
+    setData(STORAGE_KEYS.ORDERS, updated);
+    deleteOrderFromSupabase(orderId);
+    toast.success('Order removed from history');
+    forceUpdate(n => n + 1);
+  };
+
+  // CLEAR all orders
+  const handleClearAllOrders = () => {
+    if (!confirm(`Clear all ${orders.length} orders from your history? This cannot be undone.`)) return;
+    const allOrders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
+    const otherOrders = allOrders.filter(o => o.patientId !== user?.id);
+    setData(STORAGE_KEYS.ORDERS, otherOrders);
+    orders.forEach(o => deleteOrderFromSupabase(o.id));
+    toast.success('Order history cleared');
+    forceUpdate(n => n + 1);
+  };
+
+  // DELETE individual appointment
+  const handleDeleteAppointment = (aptId: string) => {
+    if (!confirm('Remove this appointment from your history?')) return;
+    const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
+    const updated = allApts.filter(a => a.id !== aptId);
+    setData(STORAGE_KEYS.APPOINTMENTS, updated);
+    deleteAppointmentFromSupabase(aptId);
+    toast.success('Appointment removed from history');
+    forceUpdate(n => n + 1);
+  };
+
+  // CLEAR all appointments
+  const handleClearAllAppointments = () => {
+    if (!confirm(`Clear all ${appointments.length} appointments from your history? This cannot be undone.`)) return;
+    const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
+    const otherApts = allApts.filter(a => a.patientId !== user?.id);
+    setData(STORAGE_KEYS.APPOINTMENTS, otherApts);
+    appointments.forEach(a => deleteAppointmentFromSupabase(a.id));
+    toast.success('Appointment history cleared');
+    forceUpdate(n => n + 1);
+  };
+
+  const statusColors: Record<string, string> = {
+    Pending: 'bg-warning/10 text-warning border-warning/20',
+    Processing: 'bg-info/10 text-info border-info/20',
+    Shipped: 'bg-primary/10 text-primary border-primary/20',
+    Delivered: 'bg-secondary/10 text-secondary border-secondary/20',
+    Cancelled: 'bg-destructive/10 text-destructive border-destructive/20',
     confirmed: 'bg-secondary/10 text-secondary border-secondary/20',
     completed: 'bg-muted text-muted-foreground border-border'
   };
@@ -46,7 +132,7 @@ const History = () => {
   return (
     <div className="min-h-screen bg-background">
       <PatientNavbar />
-      
+
       <main className="container mx-auto px-4 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">History</h1>
@@ -78,19 +164,59 @@ const History = () => {
           <TabsContent value="orders">
             {orders.length > 0 ? (
               <div className="space-y-4">
+                <div className="flex justify-end">
+                  <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10" onClick={handleClearAllOrders}>
+                    <Eraser className="w-4 h-4 mr-1" /> Clear All Orders
+                  </Button>
+                </div>
                 {orders.map((order) => (
-                  <Card key={order.id} className="border-2">
+                  <Card key={order.id} className={`border-2 ${order.status === 'Cancelled' ? 'opacity-70' : ''}`}>
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
                         <div>
                           <CardTitle className="text-lg">Order #{order.id.slice(-6)}</CardTitle>
                           <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
                             <Calendar className="w-4 h-4" /> {order.orderDate}
+                            {order.paymentMethod && (
+                              <Badge variant="outline" className="ml-2 text-xs">
+                                {order.paymentMethod === 'wallet' ? '💳 Wallet' : '💵 COD'}
+                              </Badge>
+                            )}
                           </p>
                         </div>
-                        <Badge className={statusColors[order.status]}>
-                          {order.status}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge className={statusColors[order.status] || ''}>
+                            {order.status}
+                          </Badge>
+                          {/* Cancel Button — only for Pending/Processing orders */}
+                          {(order.status === 'Pending' || order.status === 'Processing') && (
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={cancellingId === order.id}
+                              onClick={() => handleCancelOrder(order)}
+                              className="h-7 px-2 text-xs"
+                            >
+                              {cancellingId === order.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <>
+                                  <XCircle className="w-3 h-3 mr-1" />
+                                  Cancel
+                                </>
+                              )}
+                            </Button>
+                          )}
+                          {/* Delete Button — remove from history */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteOrder(order.id)}
+                            className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -110,16 +236,23 @@ const History = () => {
                           </div>
                         ))}
                       </div>
-                      
+
                       <Separator className="my-4" />
-                      
+
                       <div className="flex items-center justify-between">
                         <div className="flex items-start gap-2 text-sm text-muted-foreground">
                           <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
                           <span>{order.deliveryAddress}</span>
                         </div>
-                        <p className="text-lg font-bold text-primary">${order.total.toFixed(2)}</p>
+                        <p className={`text-lg font-bold ${order.status === 'Cancelled' ? 'text-destructive line-through' : 'text-primary'}`}>
+                          ${order.total.toFixed(2)}
+                        </p>
                       </div>
+                      {order.status === 'Cancelled' && order.paymentMethod === 'wallet' && (
+                        <p className="text-xs text-green-600 text-right mt-1">
+                          ✓ Refunded to wallet
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
@@ -188,6 +321,11 @@ const History = () => {
           <TabsContent value="appointments">
             {appointments.length > 0 ? (
               <div className="space-y-4">
+                <div className="flex justify-end">
+                  <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10" onClick={handleClearAllAppointments}>
+                    <Eraser className="w-4 h-4 mr-1" /> Clear All Appointments
+                  </Button>
+                </div>
                 {appointments.map((apt) => (
                   <Card key={apt.id} className="border-2">
                     <CardContent className="p-4">
@@ -208,9 +346,19 @@ const History = () => {
                             </div>
                           </div>
                         </div>
-                        <Badge className={statusColors[apt.status]}>
-                          {apt.status}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge className={statusColors[apt.status] || ''}>
+                            {apt.status}
+                          </Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteAppointment(apt.id)}
+                            className="h-7 px-2 text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

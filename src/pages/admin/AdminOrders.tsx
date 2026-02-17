@@ -10,20 +10,82 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getData, setData, STORAGE_KEYS, Order } from "@/lib/data";
-import { Package, MapPin } from "lucide-react";
+import { syncOrderStatusToSupabase, deleteOrderFromSupabase } from "@/lib/supabaseSync";
+import { Package, MapPin, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useWallet } from "@/contexts/WalletContext";
 
 const AdminOrders = () => {
   const [orders, setOrders] = useState<Order[]>(
     getData(STORAGE_KEYS.ORDERS, []),
   );
 
-  const updateStatus = (id: string, status: Order["status"]) => {
+  const { addCredits } = useWallet();
+
+  const refundToPatient = async (order: Order) => {
+    const patientId = order.patientId;
+    const amount = order.total;
+
+    // 1. Try WalletContext (handles both Supabase RPC + localStorage)
+    const success = await addCredits(amount, `Refund for Order #${order.id.slice(-6)}`, patientId, 'refund');
+
+    // 2. Double-check localStorage was updated (guaranteed fallback)
+    const users = getData<any[]>(STORAGE_KEYS.USERS, []);
+    const patient = users.find(u => u.id === patientId);
+    if (patient) {
+      const currentBalance = patient.balance || 0;
+      // Only update if addCredits didn't already do it
+      if (!success) {
+        const updatedUsers = users.map(u =>
+          u.id === patientId ? { ...u, balance: currentBalance + amount } : u
+        );
+        setData(STORAGE_KEYS.USERS, updatedUsers);
+      }
+      const newBalance = (patient.balance || 0) + (success ? 0 : amount);
+      toast.success(`Refunded $${amount.toFixed(2)} → ${patient.name}'s wallet (Balance: $${success ? (currentBalance + amount).toFixed(2) : newBalance.toFixed(2)})`);
+      return true;
+    }
+
+    if (success) {
+      toast.success(`Refunded $${amount.toFixed(2)} to patient wallet.`);
+      return true;
+    }
+
+    toast.error("Refund failed — patient not found.");
+    return false;
+  };
+
+  const updateStatus = async (id: string, status: Order["status"]) => {
+    const orderToUpdate = orders.find(o => o.id === id);
+
+    // Handle Refund on Cancellation
+    if (status === 'Cancelled' && orderToUpdate?.status !== 'Cancelled' && orderToUpdate?.paymentMethod === 'wallet') {
+      if (confirm("This order was paid via Wallet. Do you want to process a refund to the patient?")) {
+        toast.info("Processing refund...");
+        const refunded = await refundToPatient(orderToUpdate);
+        if (!refunded) {
+          toast.error("Refund failed. Status update cancelled.");
+          return;
+        }
+      }
+    }
+
     const updated = orders.map((o) => (o.id === id ? { ...o, status } : o));
     setOrders(updated);
     setData(STORAGE_KEYS.ORDERS, updated);
+    syncOrderStatusToSupabase(id, status);
     toast.success("Order status updated!");
+  };
+
+  const handleDelete = (id: string) => {
+    if (!confirm("Are you sure you want to delete this order?")) return;
+    const updated = orders.filter((o) => o.id !== id);
+    setOrders(updated);
+    setData(STORAGE_KEYS.ORDERS, updated);
+    deleteOrderFromSupabase(id);
+    toast.success("Order deleted");
   };
 
   return (
@@ -42,23 +104,28 @@ const AdminOrders = () => {
                       {o.patientName} • {o.orderDate}
                     </p>
                   </div>
-                  <Select
-                    value={o.status}
-                    onValueChange={(v) =>
-                      updateStatus(o.id, v as Order["status"])
-                    }
-                  >
-                    <SelectTrigger className="w-32">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-popover">
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="processing">Processing</SelectItem>
-                      <SelectItem value="shipped">Shipped</SelectItem>
-                      <SelectItem value="delivered">Delivered</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={o.status}
+                      onValueChange={(v) =>
+                        updateStatus(o.id, v as Order["status"])
+                      }
+                    >
+                      <SelectTrigger className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover">
+                        <SelectItem value="Pending">Pending</SelectItem>
+                        <SelectItem value="Processing">Processing</SelectItem>
+                        <SelectItem value="Shipped">Shipped</SelectItem>
+                        <SelectItem value="Delivered">Delivered</SelectItem>
+                        <SelectItem value="Cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(o.id)}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
                 <div className="text-sm text-muted-foreground mb-2">
                   {o.items

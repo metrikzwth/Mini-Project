@@ -16,7 +16,9 @@ import PatientNavbar from "@/components/layout/PatientNavbar";
 import MedicineChatbot from "@/components/chatbot/MedicineChatbot";
 import { useCart } from "@/contexts/CartContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWallet } from "@/contexts/WalletContext";
 import { getData, setData, STORAGE_KEYS, Order } from "@/lib/data";
+import { syncOrderToSupabase } from "@/lib/supabaseSync";
 import {
   ShoppingCart,
   Trash2,
@@ -36,6 +38,8 @@ const Cart = () => {
   const { user } = useAuth();
   const { items, removeFromCart, updateQuantity, clearCart, totalPrice } =
     useCart();
+  const { balance, transferCredits } = useWallet();
+  const [payWithWallet, setPayWithWallet] = useState(false);
 
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
@@ -47,10 +51,30 @@ const Cart = () => {
       return;
     }
 
+    if (payWithWallet && balance < totalPrice) {
+      toast.error("Insufficient wallet balance");
+      return;
+    }
+
     setIsCheckingOut(true);
 
     // Simulate processing
     await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Handle Wallet Payment
+    let transactionId = undefined;
+    if (payWithWallet) {
+      // Find Admin ID (In real app, fetch from system settings or env)
+      const adminId = 'a1';
+
+      const success = await transferCredits(totalPrice, adminId, `Order Payment #${Date.now()}`);
+      if (!success) {
+        setIsCheckingOut(false);
+        return;
+      }
+      toast.info(`Payment transferred. Admin ID: ${adminId}`);
+      transactionId = `TXN${Date.now()}`;
+    }
 
     // Create order
     const newOrder: Order = {
@@ -67,11 +91,16 @@ const Cart = () => {
       status: "Pending",
       orderDate: new Date().toISOString().split("T")[0],
       deliveryAddress: address,
+      paymentMethod: payWithWallet ? "wallet" : "cod",
+      transactionId
     };
 
     const orders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
     orders.push(newOrder);
     setData(STORAGE_KEYS.ORDERS, orders);
+
+    // Dual-write: sync to Supabase
+    syncOrderToSupabase(newOrder);
 
     clearCart();
     setOrderPlaced(true);
@@ -280,6 +309,29 @@ const Cart = () => {
                     placeholder="Enter your full delivery address"
                     rows={3}
                   />
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <input
+                    type="checkbox"
+                    id="payWithWallet"
+                    checked={payWithWallet}
+                    onChange={(e) => setPayWithWallet(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    disabled={balance < totalPrice}
+                  />
+                  <div className="grid gap-1.5 leading-none">
+                    <label
+                      htmlFor="payWithWallet"
+                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      Pay with Wallet
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      Balance: ${balance.toFixed(2)}
+                      {balance < totalPrice && <span className="text-destructive ml-1">(Insufficient)</span>}
+                    </p>
+                  </div>
                 </div>
               </CardContent>
 

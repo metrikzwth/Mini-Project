@@ -5,13 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
-import { getData, STORAGE_KEYS, Appointment, Order } from '@/lib/data';
-import { 
-  Pill, 
-  Calendar, 
-  Video, 
-  FileText, 
-  Package, 
+import { getData, STORAGE_KEYS, Appointment, Order, Doctor } from '@/lib/data';
+import {
+  Pill,
+  Calendar,
+  Video,
+  FileText,
+  Package,
   Clock,
   ArrowRight,
   Heart,
@@ -22,6 +22,7 @@ const PatientDashboard = () => {
   const { user } = useAuth();
   const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
     .filter(a => a.patientId === user?.id && a.status !== 'cancelled');
+  const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []); // Fetch doctors for images
   const orders = getData<Order[]>(STORAGE_KEYS.ORDERS, [])
     .filter(o => o.patientId === user?.id);
 
@@ -38,16 +39,25 @@ const PatientDashboard = () => {
   return (
     <div className="min-h-screen bg-background">
       <PatientNavbar />
-      
+
       <main className="container mx-auto px-4 py-8">
         {/* Welcome Section */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground mb-2">
-            Welcome back, {user?.name?.split(' ')[0]}! 👋
-          </h1>
-          <p className="text-muted-foreground">
-            Your health journey at a glance. What would you like to do today?
-          </p>
+        <div className="mb-8 flex items-center gap-4">
+          <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-primary bg-muted flex items-center justify-center shrink-0">
+            {user?.image ? (
+              <img src={user.image} alt="Profile" className="w-full h-full object-cover" />
+            ) : (
+              <div className="text-2xl">👋</div>
+            )}
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-foreground mb-1">
+              Welcome back, {user?.name?.split(' ')[0]}!
+            </h1>
+            <p className="text-muted-foreground">
+              Your health journey at a glance. What would you like to do today?
+            </p>
+          </div>
         </div>
 
         {/* Quick Actions */}
@@ -89,22 +99,29 @@ const PatientDashboard = () => {
             <CardContent>
               {upcomingAppointments.length > 0 ? (
                 <div className="space-y-4">
-                  {upcomingAppointments.slice(0, 3).map((apt) => (
-                    <div key={apt.id} className="flex items-center justify-between p-4 bg-muted rounded-lg">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
-                          <Video className="w-6 h-6 text-primary" />
+                  {upcomingAppointments.slice(0, 3).map((apt) => {
+                    const doc = doctors.find(d => d.id === apt.doctorId);
+                    return (
+                      <div key={apt.id} className="flex items-center justify-between p-4 bg-muted rounded-lg">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center overflow-hidden border">
+                            {doc?.image && doc.image !== '/placeholder.svg' ? (
+                              <img src={doc.image} alt={doc.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <Video className="w-6 h-6 text-primary" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-medium text-foreground">{apt.doctorName}</p>
+                            <p className="text-sm text-muted-foreground">{apt.date} at {apt.time}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium text-foreground">{apt.doctorName}</p>
-                          <p className="text-sm text-muted-foreground">{apt.date} at {apt.time}</p>
-                        </div>
+                        <Badge variant={apt.status === 'confirmed' ? 'default' : 'secondary'}>
+                          {apt.status}
+                        </Badge>
                       </div>
-                      <Badge variant={apt.status === 'confirmed' ? 'default' : 'secondary'}>
-                        {apt.status}
-                      </Badge>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-8">

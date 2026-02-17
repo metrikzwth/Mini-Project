@@ -1,36 +1,50 @@
-import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Stethoscope, User, UserCog, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Stethoscope, User, UserCog, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 const Login = () => {
   const navigate = useNavigate();
   const { login, register } = useAuth();
-  
+
   const [isLoading, setIsLoading] = useState(false);
-  const [loginData, setLoginData] = useState({ email: '', password: '' });
-  const [registerData, setRegisterData] = useState({ email: '', password: '', name: '', role: 'patient' as 'patient' | 'doctor' });
+  const [loginData, setLoginData] = useState({ email: "", password: "" });
+  const [registerData, setRegisterData] = useState({
+    email: "",
+    password: "",
+    name: "",
+    role: "patient" as "patient" | "doctor",
+  });
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
     // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    const result = login(loginData.email, loginData.password);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const result = await login(loginData.email, loginData.password);
     setIsLoading(false);
-    
+
     if (result.success) {
       toast.success(result.message);
-      const redirectPath = result.user?.role === 'doctor' ? '/doctor/dashboard' : '/patient/dashboard';
+      const redirectPath =
+        result.user?.role === "doctor"
+          ? "/doctor/dashboard"
+          : "/patient/dashboard";
       navigate(redirectPath);
     } else {
       toast.error(result.message);
@@ -39,22 +53,39 @@ const Login = () => {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!registerData.email || !registerData.password || !registerData.name) {
-      toast.error('Please fill in all fields');
+      toast.error("Please fill in all fields");
       return;
     }
-    
+
     setIsLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    const result = register(registerData.email, registerData.password, registerData.name, registerData.role);
+    // Remove artificial delay to make it feel snappier
+    // await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const result = await register(
+      registerData.email,
+      registerData.password,
+      registerData.name,
+      registerData.role,
+    );
     setIsLoading(false);
-    
+
     if (result.success) {
       toast.success(result.message);
-      const redirectPath = registerData.role === 'doctor' ? '/doctor/dashboard' : '/patient/dashboard';
-      navigate(redirectPath);
+
+      // Only redirect if we have a session (auto-confirmed)
+      if (result.session) {
+        const redirectPath =
+          registerData.role === "doctor"
+            ? "/doctor/dashboard"
+            : "/patient/dashboard";
+        navigate(redirectPath);
+      } else {
+        // If email confirmation is required, switch back to login tab or stay here
+        // Maybe clear the form?
+        setRegisterData(prev => ({ ...prev, password: '' }));
+      }
     } else {
       toast.error(result.message);
     }
@@ -69,7 +100,9 @@ const Login = () => {
             <Stethoscope className="w-8 h-8 text-primary-foreground" />
           </div>
           <h1 className="text-3xl font-bold text-foreground">MediCare</h1>
-          <p className="text-muted-foreground mt-2">Your Health, Our Priority</p>
+          <p className="text-muted-foreground mt-2">
+            Your Health, Our Priority
+          </p>
         </div>
 
         <Card className="border-2">
@@ -95,7 +128,9 @@ const Login = () => {
                       type="email"
                       placeholder="your@email.com"
                       value={loginData.email}
-                      onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+                      onChange={(e) =>
+                        setLoginData({ ...loginData, email: e.target.value })
+                      }
                       required
                     />
                   </div>
@@ -106,7 +141,9 @@ const Login = () => {
                       type="password"
                       placeholder="••••••••"
                       value={loginData.password}
-                      onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                      onChange={(e) =>
+                        setLoginData({ ...loginData, password: e.target.value })
+                      }
                       required
                     />
                   </div>
@@ -117,17 +154,47 @@ const Login = () => {
                         Signing in...
                       </>
                     ) : (
-                      'Sign In'
+                      "Sign In"
                     )}
                   </Button>
                 </form>
 
-                {/* Demo Credentials */}
-                <div className="mt-6 p-4 bg-muted rounded-lg">
-                  <p className="text-sm font-medium text-foreground mb-2">Demo Credentials:</p>
-                  <div className="space-y-1 text-sm text-muted-foreground">
-                    <p><strong>Patient:</strong> patient@test.com / patient123</p>
-                    <p><strong>Doctor:</strong> doctor@test.com / doctor123</p>
+                {/* Quick Login & Demo Key */}
+                <div className="mt-6 space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setLoginData({ email: 'patient@test.com', password: 'patient123' });
+                        // Optional: auto-submit or just fill
+                      }}
+                      className="w-full text-xs"
+                    >
+                      Patient Login
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setLoginData({ email: 'doctor@test.com', password: 'doctor123' });
+                      }}
+                      className="w-full text-xs"
+                    >
+                      Doctor Login
+                    </Button>
+                  </div>
+
+                  <div className="p-4 bg-muted rounded-lg">
+                    <p className="text-sm font-medium text-foreground mb-2">
+                      Demo Credentials:
+                    </p>
+                    <div className="space-y-1 text-sm text-muted-foreground">
+                      <p>
+                        <strong>Patient:</strong> patient@test.com / patient123
+                      </p>
+                      <p>
+                        <strong>Doctor:</strong> doctor@test.com / doctor123
+                      </p>
+                    </div>
                   </div>
                 </div>
               </TabsContent>
@@ -141,7 +208,12 @@ const Login = () => {
                       type="text"
                       placeholder="John Doe"
                       value={registerData.name}
-                      onChange={(e) => setRegisterData({ ...registerData, name: e.target.value })}
+                      onChange={(e) =>
+                        setRegisterData({
+                          ...registerData,
+                          name: e.target.value,
+                        })
+                      }
                       required
                     />
                   </div>
@@ -152,7 +224,12 @@ const Login = () => {
                       type="email"
                       placeholder="your@email.com"
                       value={registerData.email}
-                      onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
+                      onChange={(e) =>
+                        setRegisterData({
+                          ...registerData,
+                          email: e.target.value,
+                        })
+                      }
                       required
                     />
                   </div>
@@ -163,7 +240,12 @@ const Login = () => {
                       type="password"
                       placeholder="••••••••"
                       value={registerData.password}
-                      onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
+                      onChange={(e) =>
+                        setRegisterData({
+                          ...registerData,
+                          password: e.target.value,
+                        })
+                      }
                       required
                     />
                   </div>
@@ -171,18 +253,29 @@ const Login = () => {
                     <Label>I am a</Label>
                     <RadioGroup
                       value={registerData.role}
-                      onValueChange={(value) => setRegisterData({ ...registerData, role: value as 'patient' | 'doctor' })}
+                      onValueChange={(value) =>
+                        setRegisterData({
+                          ...registerData,
+                          role: value as "patient" | "doctor",
+                        })
+                      }
                       className="flex gap-4"
                     >
                       <div className="flex items-center space-x-2">
                         <RadioGroupItem value="patient" id="patient" />
-                        <Label htmlFor="patient" className="flex items-center gap-2 cursor-pointer">
+                        <Label
+                          htmlFor="patient"
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
                           <User className="w-4 h-4" /> Patient
                         </Label>
                       </div>
                       <div className="flex items-center space-x-2">
                         <RadioGroupItem value="doctor" id="doctor" />
-                        <Label htmlFor="doctor" className="flex items-center gap-2 cursor-pointer">
+                        <Label
+                          htmlFor="doctor"
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
                           <UserCog className="w-4 h-4" /> Doctor
                         </Label>
                       </div>
@@ -195,7 +288,7 @@ const Login = () => {
                         Creating account...
                       </>
                     ) : (
-                      'Create Account'
+                      "Create Account"
                     )}
                   </Button>
                 </form>
@@ -203,14 +296,6 @@ const Login = () => {
             </Tabs>
           </CardContent>
         </Card>
-
-        {/* Admin Link */}
-        <p className="text-center mt-6 text-sm text-muted-foreground">
-          Are you an admin?{' '}
-          <Link to="/admin/login" className="text-primary hover:underline font-medium">
-            Go to Admin Portal
-          </Link>
-        </p>
       </div>
     </div>
   );

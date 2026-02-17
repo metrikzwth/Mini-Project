@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,19 +11,19 @@ import { toast } from 'sonner';
 const AdminLogin = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [loginData, setLoginData] = useState({ email: '', password: '' });
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
     await new Promise(resolve => setTimeout(resolve, 800));
-    
-    const result = login(loginData.email, loginData.password);
+
+    const result = await login(loginData.email, loginData.password);
     setIsLoading(false);
-    
+
     if (result.success && result.user?.role === 'admin') {
       toast.success('Welcome back, Admin!');
       navigate('/admin/dashboard');
@@ -100,13 +100,6 @@ const AdminLogin = () => {
           </CardContent>
         </Card>
 
-        {/* Patient/Doctor Portal Link */}
-        <p className="text-center mt-6 text-sm text-sidebar-foreground/70">
-          Not an admin?{' '}
-          <Link to="/" className="text-sidebar-primary hover:underline font-medium">
-            Go to Patient/Doctor Portal
-          </Link>
-        </p>
       </div>
     </div>
   );

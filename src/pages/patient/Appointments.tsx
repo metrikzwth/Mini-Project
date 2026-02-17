@@ -9,12 +9,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
+import { useWallet } from '@/contexts/WalletContext';
 import { getData, setData, STORAGE_KEYS, Doctor, Appointment } from '@/lib/data';
-import { 
-  Calendar, 
-  Clock, 
-  Star, 
-  Video, 
+import { syncAppointmentToSupabase } from '@/lib/supabaseSync';
+import {
+  Calendar,
+  Clock,
+  Star,
+  Video,
   User,
   CheckCircle,
   Loader2
@@ -23,11 +25,12 @@ import { toast } from 'sonner';
 
 const Appointments = () => {
   const { user } = useAuth();
+  const { balance, deductCredits, transferCredits } = useWallet();
   const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []).filter(d => d.isActive);
   const [myAppointments, setMyAppointments] = useState<Appointment[]>(
     getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []).filter(a => a.patientId === user?.id)
   );
-  
+
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
   const [isBooking, setIsBooking] = useState(false);
   const [bookingData, setBookingData] = useState({
@@ -35,6 +38,9 @@ const Appointments = () => {
     time: '',
     type: 'video' as 'video' | 'in-person'
   });
+  const [payWithWallet, setPayWithWallet] = useState(false);
+
+  const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
   const handleBookAppointment = async () => {
     if (!selectedDoctor || !bookingData.date || !bookingData.time) {
@@ -42,8 +48,32 @@ const Appointments = () => {
       return;
     }
 
+    if (payWithWallet && balance < selectedDoctor.fee) {
+      toast.error('Insufficient wallet balance');
+      return;
+    }
+
     setIsBooking(true);
     await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Handle Wallet Payment
+    let transactionId = undefined;
+    if (payWithWallet) {
+      let success = false;
+
+      // Always use transferCredits, which handles both Local and DB users correctly
+      success = await transferCredits(
+        selectedDoctor.fee,
+        selectedDoctor.id,
+        `Consultation with ${selectedDoctor.name}`
+      );
+
+      if (!success) {
+        setIsBooking(false);
+        return;
+      }
+      transactionId = `TXN${Date.now()}`;
+    }
 
     const newAppointment: Appointment = {
       id: `APT${Date.now()}`,
@@ -54,16 +84,21 @@ const Appointments = () => {
       date: bookingData.date,
       time: bookingData.time,
       status: 'pending',
-      type: bookingData.type
+      type: bookingData.type,
+      paymentMethod: payWithWallet ? 'wallet' : 'cod',
+      transactionId,
+      fee: selectedDoctor.fee
     };
 
     const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
     appointments.push(newAppointment);
     setData(STORAGE_KEYS.APPOINTMENTS, appointments);
-    
+    syncAppointmentToSupabase(newAppointment);
+
     setMyAppointments(prev => [...prev, newAppointment]);
     setSelectedDoctor(null);
     setBookingData({ date: '', time: '', type: 'video' });
+    setPayWithWallet(false);
     setIsBooking(false);
     toast.success('Appointment booked successfully!');
   };
@@ -73,7 +108,7 @@ const Appointments = () => {
   return (
     <div className="min-h-screen bg-background">
       <PatientNavbar />
-      
+
       <main className="container mx-auto px-4 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">Book Appointments</h1>
@@ -87,41 +122,48 @@ const Appointments = () => {
           <div className="mb-12">
             <h2 className="text-xl font-bold text-foreground mb-4">Your Appointments</h2>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {myAppointments.map((apt) => (
-                <Card key={apt.id} className="border-2">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-4 mb-3">
-                      <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
-                        <Video className="w-6 h-6 text-primary" />
+              {myAppointments.map((apt) => {
+                const doc = doctors.find(d => d.id === apt.doctorId);
+                return (
+                  <Card key={apt.id} className="border-2">
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-4 mb-3">
+                        <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center overflow-hidden border">
+                          {doc?.image && doc.image !== '/placeholder.svg' ? (
+                            <img src={doc.image} alt={doc.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <Video className="w-6 h-6 text-primary" />
+                          )}
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-foreground">{apt.doctorName}</h3>
+                          <Badge variant={
+                            apt.status === 'confirmed' ? 'default' :
+                              apt.status === 'completed' ? 'secondary' :
+                                apt.status === 'cancelled' ? 'destructive' : 'outline'
+                          }>
+                            {apt.status}
+                          </Badge>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-foreground">{apt.doctorName}</h3>
-                        <Badge variant={
-                          apt.status === 'confirmed' ? 'default' :
-                          apt.status === 'completed' ? 'secondary' :
-                          apt.status === 'cancelled' ? 'destructive' : 'outline'
-                        }>
-                          {apt.status}
-                        </Badge>
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-4 h-4" /> {apt.date}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-4 h-4" /> {apt.time}
+                        </span>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-4 h-4" /> {apt.date}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-4 h-4" /> {apt.time}
-                      </span>
-                    </div>
-                    {apt.status === 'confirmed' && (
-                      <Button className="w-full mt-4" variant="secondary">
-                        <Video className="w-4 h-4 mr-2" />
-                        Join Consultation
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
+                      {apt.status === 'confirmed' && (
+                        <Button className="w-full mt-4" variant="secondary">
+                          <Video className="w-4 h-4 mr-2" />
+                          Join Consultation
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })}
             </div>
           </div>
         )}
@@ -133,8 +175,12 @@ const Appointments = () => {
             <Card key={doctor.id} className="border-2 card-hover">
               <CardHeader className="pb-3">
                 <div className="flex items-start gap-4">
-                  <div className="w-16 h-16 bg-secondary/10 rounded-full flex items-center justify-center shrink-0">
-                    <User className="w-8 h-8 text-secondary" />
+                  <div className="w-16 h-16 bg-secondary/10 rounded-full flex items-center justify-center shrink-0 overflow-hidden border">
+                    {doctor.image && doctor.image !== '/placeholder.svg' ? (
+                      <img src={doctor.image} alt={doctor.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <User className="w-8 h-8 text-secondary" />
+                    )}
                   </div>
                   <div>
                     <CardTitle className="text-lg">{doctor.name}</CardTitle>
@@ -147,14 +193,14 @@ const Appointments = () => {
                   </div>
                 </div>
               </CardHeader>
-              
+
               <CardContent className="space-y-3">
                 <div className="flex flex-wrap gap-1">
                   {doctor.availability.map((day) => (
                     <Badge key={day} variant="outline" className="text-xs">{day}</Badge>
                   ))}
                 </div>
-                
+
                 <div className="flex items-center justify-between pt-2">
                   <span className="text-sm text-muted-foreground">Consultation Fee</span>
                   <span className="text-xl font-bold text-primary">${doctor.fee}</span>
@@ -162,8 +208,8 @@ const Appointments = () => {
               </CardContent>
 
               <CardFooter>
-                <Button 
-                  className="w-full" 
+                <Button
+                  className="w-full"
                   onClick={() => setSelectedDoctor(doctor)}
                 >
                   <Calendar className="w-4 h-4 mr-2" />
@@ -186,8 +232,12 @@ const Appointments = () => {
 
             <div className="space-y-4 py-4">
               <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
-                <div className="w-12 h-12 bg-secondary/10 rounded-full flex items-center justify-center">
-                  <User className="w-6 h-6 text-secondary" />
+                <div className="w-12 h-12 bg-secondary/10 rounded-full flex items-center justify-center overflow-hidden border">
+                  {selectedDoctor?.image && selectedDoctor.image !== '/placeholder.svg' ? (
+                    <img src={selectedDoctor.image} alt={selectedDoctor.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-6 h-6 text-secondary" />
+                  )}
                 </div>
                 <div>
                   <h4 className="font-semibold">{selectedDoctor?.name}</h4>
@@ -231,6 +281,30 @@ const Appointments = () => {
                     <SelectItem value="in-person">In-Person</SelectItem>
                   </SelectContent>
                 </Select>
+
+              </div>
+
+              <div className="flex items-center gap-2 pt-2 border-t mt-4">
+                <input
+                  type="checkbox"
+                  id="payWithWalletApt"
+                  checked={payWithWallet}
+                  onChange={(e) => setPayWithWallet(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  disabled={balance < (selectedDoctor?.fee || 0)}
+                />
+                <div className="grid gap-1.5 leading-none">
+                  <label
+                    htmlFor="payWithWalletApt"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  >
+                    Pay with Wallet
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Balance: ${balance.toFixed(2)}
+                    {balance < (selectedDoctor?.fee || 0) && <span className="text-destructive ml-1">(Insufficient)</span>}
+                  </p>
+                </div>
               </div>
             </div>
 

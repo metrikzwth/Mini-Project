@@ -3,8 +3,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MessageCircle, X, Send, Bot, User, AlertTriangle } from 'lucide-react';
-import { getData, STORAGE_KEYS, Medicine, chatbotKnowledge } from '@/lib/data';
+import { MessageCircle, X, Send, Bot, User, AlertTriangle, Sparkles } from 'lucide-react';
+import { getData, STORAGE_KEYS, Medicine } from '@/lib/data';
+import { askGemini, isGeminiConfigured } from '@/lib/gemini';
 import { cn } from '@/lib/utils';
 
 interface Message {
@@ -16,10 +17,13 @@ interface Message {
 
 const MedicineChatbot = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const geminiEnabled = isGeminiConfigured();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      content: "Hello! I'm your MediCare AI assistant. I can help you with medicine-related questions such as:\n\n• When to take a medicine (before/after food)\n• What to drink with medications\n• Foods to avoid\n• Dosage timing\n• General precautions\n\nHow can I help you today?",
+      content: geminiEnabled
+        ? "Hello! I'm MediCare AI, powered by Gemini ✨\n\nI can help you with:\n\n• Medicine timing & dosage guidance\n• What to take with/avoid with medicines\n• Side effects & precautions\n• Drug interaction awareness\n• General wellness tips\n\nAsk me anything about medicines!"
+        : "Hello! I'm your MediCare AI assistant. I can help you with medicine-related questions such as:\n\n• When to take a medicine (before/after food)\n• What to drink with medications\n• Foods to avoid\n• Dosage timing\n• General precautions\n\nHow can I help you today?",
       isBot: true,
       timestamp: new Date()
     }
@@ -34,19 +38,19 @@ const MedicineChatbot = () => {
     }
   }, [messages]);
 
+  // ===== KEYWORD FALLBACK (original logic) =====
   const findMedicineInfo = (query: string): string | null => {
     const medicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
     const lowerQuery = query.toLowerCase();
-    
-    // Find matching medicine
-    const medicine = medicines.find(m => 
+
+    const medicine = medicines.find(m =>
       lowerQuery.includes(m.name.toLowerCase()) ||
-      m.name.toLowerCase().split(' ').some(word => lowerQuery.includes(word.toLowerCase()))
+      m.name.toLowerCase().split(' ').some(word => word.length > 2 && lowerQuery.includes(word.toLowerCase()))
     );
 
-    if (medicine) {
+    if (medicine && medicine.instructions) {
       const { instructions } = medicine;
-      const timingMap = {
+      const timingMap: Record<string, string> = {
         'before_food': 'before meals',
         'after_food': 'after meals',
         'with_food': 'with food',
@@ -54,26 +58,27 @@ const MedicineChatbot = () => {
       };
 
       return `**${medicine.name}**\n\n` +
-        `📋 **When to take:** ${timingMap[instructions.timing]}\n\n` +
-        `🥤 **What to drink:** ${instructions.drinkWith}\n\n` +
-        `🚫 **Foods to avoid:** ${instructions.foodsToAvoid.length > 0 ? instructions.foodsToAvoid.join(', ') : 'No specific restrictions'}\n\n` +
-        `⏰ **Dosage timing:** ${instructions.dosageTiming}\n\n` +
-        `⚠️ **Precautions:**\n${instructions.precautions.map(p => `• ${p}`).join('\n')}`;
+        `📋 **When to take:** ${timingMap[instructions.timing] || instructions.timing || 'Not specified'}\n\n` +
+        `🥤 **What to drink:** ${instructions.drinkWith || 'Water'}\n\n` +
+        `🚫 **Foods to avoid:** ${instructions.foodsToAvoid?.length > 0 ? instructions.foodsToAvoid.join(', ') : 'No specific restrictions'}\n\n` +
+        `⏰ **Dosage timing:** ${instructions.dosageTiming || 'As directed'}\n\n` +
+        `⚠️ **Precautions:**\n${instructions.precautions?.length > 0 ? instructions.precautions.map(p => `• ${p}`).join('\n') : '• Follow your doctor\'s advice'}`;
+    } else if (medicine) {
+      return `**${medicine.name}**\n\n` +
+        `💊 ${medicine.description || 'Medicine available in our store.'}\n` +
+        `💰 Price: $${medicine.price?.toFixed(2) || 'N/A'}\n` +
+        `📦 Stock: ${medicine.stock ?? 'N/A'}`;
     }
 
     return null;
   };
 
-  const generateResponse = (query: string): string => {
+  const generateKeywordResponse = (query: string): string => {
     const lowerQuery = query.toLowerCase();
-    
-    // Check for medicine-specific queries
-    const medicineInfo = findMedicineInfo(query);
-    if (medicineInfo) {
-      return medicineInfo;
-    }
 
-    // General topic responses
+    const medicineInfo = findMedicineInfo(query);
+    if (medicineInfo) return medicineInfo;
+
     if (lowerQuery.includes('before') && lowerQuery.includes('food')) {
       return "Many medicines work best when taken before food because:\n\n• Better absorption on an empty stomach\n• Reduces interaction with food\n• More effective for conditions like acid reflux\n\nExamples include antibiotics, antacids, and some diabetes medications. Always check your specific medication's instructions!";
     }
@@ -98,10 +103,10 @@ const MedicineChatbot = () => {
       return "I can help you with:\n\n• 💊 Medicine intake timing (before/after food)\n• 🥤 What to drink with medications\n• 🍎 Foods to avoid\n• ⏰ Dosage timing recommendations\n• ⚠️ General precautions\n\nJust ask about any medicine in our database or general medication questions!";
     }
 
-    // Default response
     return "I'm not sure about that specific question. Try asking about:\n\n• A specific medicine name (e.g., 'Tell me about Paracetamol')\n• When to take medicine (before/after food)\n• What to drink with medications\n• Foods to avoid with medicines\n• Dosage timing\n\nI'm here to help with medicine-related questions!";
   };
 
+  // ===== SEND MESSAGE =====
   const handleSend = async () => {
     if (!input.trim()) return;
 
@@ -113,17 +118,46 @@ const MedicineChatbot = () => {
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const currentInput = input;
     setInput('');
     setIsTyping(true);
 
-    // Simulate typing delay
-    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+    let responseText: string;
 
-    const response = generateResponse(input);
-    
+    if (geminiEnabled) {
+      // Build conversation history from recent messages (last 10)
+      const history = messages
+        .slice(-10)
+        .map(m => ({
+          role: (m.isBot ? "model" : "user") as "user" | "model",
+          text: m.content,
+        }));
+
+      // Enrich with medicine data if a medicine name is mentioned
+      let enrichedInput = currentInput;
+      const medicineInfo = findMedicineInfo(currentInput);
+      if (medicineInfo) {
+        enrichedInput = `${currentInput}\n\n[SYSTEM CONTEXT - The following medicine exists in our database:\n${medicineInfo}]\nUse the above data to give an informed response.`;
+      }
+
+      const result = await askGemini(enrichedInput, history);
+
+      if (result.error) {
+        // Fallback to keyword-based
+        console.warn("Gemini error, falling back:", result.error);
+        responseText = generateKeywordResponse(currentInput);
+      } else {
+        responseText = result.text;
+      }
+    } else {
+      // Keyword fallback
+      await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 800));
+      responseText = generateKeywordResponse(currentInput);
+    }
+
     const botMessage: Message = {
       id: (Date.now() + 1).toString(),
-      content: response,
+      content: responseText,
       isBot: true,
       timestamp: new Date()
     };
@@ -154,9 +188,14 @@ const MedicineChatbot = () => {
             <div className="w-10 h-10 bg-primary-foreground/20 rounded-full flex items-center justify-center">
               <Bot className="w-6 h-6" />
             </div>
-            <div>
-              <h3 className="font-semibold">MediCare AI Assistant</h3>
-              <p className="text-xs opacity-80">Medicine guidance chatbot</p>
+            <div className="flex-1">
+              <h3 className="font-semibold flex items-center gap-1.5">
+                MediCare AI
+                {geminiEnabled && <Sparkles className="w-4 h-4 text-yellow-300" />}
+              </h3>
+              <p className="text-xs opacity-80">
+                {geminiEnabled ? "Powered by Gemini AI" : "Medicine guidance chatbot"}
+              </p>
             </div>
           </div>
 
@@ -230,7 +269,7 @@ const MedicineChatbot = () => {
               <Input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask about a medicine..."
+                placeholder={geminiEnabled ? "Ask anything about medicines..." : "Ask about a medicine..."}
                 className="flex-1"
               />
               <Button type="submit" size="icon" disabled={!input.trim() || isTyping}>

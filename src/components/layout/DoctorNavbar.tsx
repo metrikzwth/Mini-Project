@@ -1,6 +1,8 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useWallet } from '@/contexts/WalletContext';
 import { Button } from '@/components/ui/button';
+import { getData, STORAGE_KEYS, Doctor } from '@/lib/data';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,25 +10,31 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { 
-  User, 
-  LogOut, 
-  Home, 
-  Calendar, 
-  Video, 
-  FileText, 
+import {
+  User,
+  LogOut,
+  Home,
+  Calendar,
+  Video,
+  FileText,
   Menu,
   X,
-  Stethoscope
+  Stethoscope,
+  Wallet
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
 const DoctorNavbar = () => {
   const { user, logout } = useAuth();
+  const { balance } = useWallet();
   const location = useLocation();
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Get doctor data to show profile image
+  const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
+  const currentDoctor = doctors.find(d => d.id === user?.id);
 
   const handleLogout = () => {
     logout();
@@ -38,6 +46,7 @@ const DoctorNavbar = () => {
     { path: '/doctor/appointments', label: 'Appointments', icon: Calendar },
     { path: '/doctor/consultation', label: 'Video Consult', icon: Video },
     { path: '/doctor/prescriptions', label: 'Prescriptions', icon: FileText },
+    { path: '/doctor/wallet', label: 'Wallet', icon: Wallet },
   ];
 
   return (
@@ -64,8 +73,8 @@ const DoctorNavbar = () => {
                   to={link.path}
                   className={cn(
                     'flex items-center gap-2 px-4 py-2 rounded-lg transition-colors',
-                    isActive 
-                      ? 'bg-secondary text-secondary-foreground' 
+                    isActive
+                      ? 'bg-secondary text-secondary-foreground'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                   )}
                 >
@@ -78,11 +87,25 @@ const DoctorNavbar = () => {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-3">
+            {/* Wallet Balance Display */}
+            <Link to="/doctor/wallet">
+              <Button variant="outline" size="sm" className="hidden md:flex gap-2">
+                <Wallet className="w-4 h-4" />
+                <span>{balance} Credits</span>
+              </Button>
+            </Link>
+
+
+
             {/* User Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full">
-                  <User className="w-5 h-5" />
+                <Button variant="ghost" size="icon" className="rounded-full overflow-hidden border">
+                  {currentDoctor?.image && currentDoctor.image !== '/placeholder.svg' ? (
+                    <img src={currentDoctor.image} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-5 h-5" />
+                  )}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 bg-popover">
@@ -99,9 +122,9 @@ const DoctorNavbar = () => {
             </DropdownMenu>
 
             {/* Mobile Menu Toggle */}
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               className="md:hidden"
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             >
@@ -123,8 +146,8 @@ const DoctorNavbar = () => {
                   onClick={() => setIsMobileMenuOpen(false)}
                   className={cn(
                     'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
-                    isActive 
-                      ? 'bg-secondary text-secondary-foreground' 
+                    isActive
+                      ? 'bg-secondary text-secondary-foreground'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                   )}
                 >
