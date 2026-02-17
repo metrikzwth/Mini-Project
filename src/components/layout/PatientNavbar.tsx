@@ -97,10 +97,11 @@ const PatientNavbar = () => {
     if (updatedUserVal) {
       try {
         setData(STORAGE_KEYS.USERS, updatedUsers);
-        setData(STORAGE_KEYS.CURRENT_USER, updatedUserVal);
+        // Update sessionStorage for auth persistence
+        sessionStorage.setItem('medicare_session_user', JSON.stringify(updatedUserVal));
         toast.success("Profile updated successfully!");
         setIsProfileOpen(false);
-        window.location.reload();
+        navigate(0); // Soft re-render instead of full page reload
       } catch (error) {
         console.error("Storage error:", error);
         toast.error("Failed to save profile. Image might be too large for local storage.");

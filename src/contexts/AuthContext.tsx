@@ -12,6 +12,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Session key used in sessionStorage (survives page refresh, cleared on tab close)
+const SESSION_USER_KEY = 'medicare_session_user';
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const [user, setUser] = useState<User | null>(null);
@@ -22,15 +25,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Initialize mock data
     initializeData();
 
-    // Check for mock user first (fallback)
-    const mockUser = getData<User | null>(STORAGE_KEYS.CURRENT_USER, null);
-    if (mockUser) {
-      setUser(mockUser);
-      setLoading(false);
-      return;
+    // Clear any old localStorage session (we now use sessionStorage only)
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+
+    // Check sessionStorage for current session (survives page refresh, cleared on tab close)
+    const sessionUserStr = sessionStorage.getItem(SESSION_USER_KEY);
+    if (sessionUserStr) {
+      try {
+        const sessionUser = JSON.parse(sessionUserStr) as User;
+        setUser(sessionUser);
+        setLoading(false);
+        return;
+      } catch {
+        sessionStorage.removeItem(SESSION_USER_KEY);
+      }
     }
 
-    // Check active session
+    // Check active Supabase session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchProfile(session.user.id, session.user.email!);
@@ -44,9 +55,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (session?.user) {
         fetchProfile(session.user.id, session.user.email!);
       } else {
-        // Only clear if not using mock user
-        const currentMock = getData<User | null>(STORAGE_KEYS.CURRENT_USER, null);
-        if (!currentMock) {
+        // Only clear if not using session user
+        const currentSession = sessionStorage.getItem(SESSION_USER_KEY);
+        if (!currentSession) {
           setUser(null);
         }
         setLoading(false);
@@ -75,17 +86,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           password: '',
         };
         setUser(userData);
+        sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(userData));
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
       // Fallback
-      setUser({
+      const fallbackUser = {
         id: userId,
         email: email,
         name: email.split('@')[0],
-        role: 'patient',
+        role: 'patient' as const,
         password: ''
-      });
+      };
+      setUser(fallbackUser);
+      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(fallbackUser));
     } finally {
       setLoading(false);
     }
@@ -98,7 +112,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     if (mockUser) {
       setUser(mockUser);
-      setData(STORAGE_KEYS.CURRENT_USER, mockUser);
+      // Persist in sessionStorage (survives refresh, cleared on tab close)
+      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(mockUser));
       return { success: true, message: 'Login successful (Mock Mode)!', user: mockUser };
     }
 
@@ -154,7 +169,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       // Auto-login
       setUser(newUser);
-      setData(STORAGE_KEYS.CURRENT_USER, newUser);
+      // Persist in sessionStorage
+      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(newUser));
 
       return {
         success: true,
@@ -171,6 +187,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = async () => {
     await supabase.auth.signOut();
     setUser(null);
+    sessionStorage.removeItem(SESSION_USER_KEY);
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
   };
 

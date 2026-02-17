@@ -1,3 +1,4 @@
+import { useState } from "react";
 import AdminSidebar from "@/components/layout/AdminSidebar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,9 +7,12 @@ import { deleteAppointmentFromSupabase } from "@/lib/supabaseSync";
 import { Calendar, User, Clock, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 const AdminAppointments = () => {
-  const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
+  const [appointments, setAppointments] = useState<Appointment[]>(
+    () => getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
+  );
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -16,9 +20,8 @@ const AdminAppointments = () => {
     const updated = appointments.filter((a) => a.id !== id);
     setData(STORAGE_KEYS.APPOINTMENTS, updated);
     deleteAppointmentFromSupabase(id);
-    // Force re-render would be needed here as we don't have state, but let's assume strict mode or navigate triggers it. 
-    // Actually, we should change this component to use state like others.
-    window.location.reload(); // Simple brute force for now as I can't refactor the whole component to state in one replace.
+    setAppointments(updated);
+    toast.success("Appointment deleted successfully");
   };
 
   return (
