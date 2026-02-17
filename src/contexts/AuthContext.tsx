@@ -99,7 +99,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (mockUser) {
       setUser(mockUser);
       setData(STORAGE_KEYS.CURRENT_USER, mockUser);
-      return { success: true, message: 'Login successful (Mock Mode)!' };
+      return { success: true, message: 'Login successful (Mock Mode)!', user: mockUser };
     }
 
     // 2. Try Supabase Login

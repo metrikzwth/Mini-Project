@@ -7,6 +7,7 @@ import { MessageCircle, X, Send, Bot, User, AlertTriangle, Sparkles } from 'luci
 import { getData, STORAGE_KEYS, Medicine } from '@/lib/data';
 import { askGemini, isGeminiConfigured } from '@/lib/gemini';
 import { cn } from '@/lib/utils';
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
   id: string;
@@ -31,12 +32,11 @@ const MedicineChatbot = () => {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isTyping]);
 
   // ===== KEYWORD FALLBACK (original logic) =====
   const findMedicineInfo = (query: string): string | null => {
@@ -145,7 +145,11 @@ const MedicineChatbot = () => {
       if (result.error) {
         // Fallback to keyword-based
         console.warn("Gemini error, falling back:", result.error);
-        responseText = generateKeywordResponse(currentInput);
+        if (result.error === "quota_exceeded") {
+          responseText = "⚠️ **AI quota temporarily exceeded.** Using offline mode.\n\n" + generateKeywordResponse(currentInput);
+        } else {
+          responseText = generateKeywordResponse(currentInput);
+        }
       } else {
         responseText = result.text;
       }
@@ -231,7 +235,13 @@ const MedicineChatbot = () => {
                         : "bg-primary text-primary-foreground"
                     )}
                   >
-                    <div className="whitespace-pre-wrap">{message.content}</div>
+                    {message.isBot ? (
+                      <div className="prose prose-sm dark:prose-invert max-w-none [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&>h1]:text-base [&>h2]:text-sm [&>h3]:text-sm">
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap">{message.content}</div>
+                    )}
                   </div>
                   {!message.isBot && (
                     <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center shrink-0">
@@ -254,6 +264,7 @@ const MedicineChatbot = () => {
                   </div>
                 </div>
               )}
+              <div ref={bottomRef} />
             </div>
           </ScrollArea>
 

@@ -72,7 +72,7 @@ export async function askGemini(
         ];
 
         const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -97,6 +97,13 @@ export async function askGemini(
         if (!response.ok) {
             const errData = await response.json().catch(() => ({}));
             console.error("Gemini API error:", errData);
+
+            if (response.status === 429) {
+                return {
+                    text: "",
+                    error: "quota_exceeded",
+                };
+            }
             return {
                 text: "",
                 error: `API error ${response.status}: ${errData?.error?.message || "Unknown error"}`,

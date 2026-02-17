@@ -13,9 +13,19 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { getData, setData, STORAGE_KEYS, Doctor, User, dataChannel } from "@/lib/data";
 import { syncDoctorToSupabase } from "@/lib/supabaseSync";
-import { Plus, Pencil, User as UserIcon, Star, Shield, Eye, EyeOff, Lock, Wallet, Minus } from "lucide-react";
+import { Plus, Pencil, User as UserIcon, Star, Shield, Eye, EyeOff, Lock, Wallet, Minus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -127,6 +137,10 @@ const AdminDoctors = () => {
   const [walletAction, setWalletAction] = useState<'add' | 'deduct'>('add');
   const [processingWallet, setProcessingWallet] = useState(false);
 
+  // Delete confirmation state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [doctorToDelete, setDoctorToDelete] = useState<Doctor | null>(null);
+
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -153,6 +167,12 @@ const AdminDoctors = () => {
   };
 
   const handleSave = async () => {
+    // Validate required fields
+    if (!form.name.trim()) {
+      toast.error("Doctor name is required.");
+      return;
+    }
+
     // 1. Create the Doctor Object
     const docId = editing?.id || `D${Date.now()}`;
     const doc: Doctor = {
@@ -167,6 +187,11 @@ const AdminDoctors = () => {
       isActive: true,
     };
 
+    // Generate default email if not provided
+    const defaultEmail = `${form.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@medicare.com`;
+    const finalEmail = form.email.trim() || defaultEmail;
+    const finalPassword = form.password.trim() || 'doctor123';
+
     // 2. Update Doctors State
     const updatedDoctors = editing
       ? doctors.map((d) => (d.id === doc.id ? doc : d))
@@ -176,24 +201,24 @@ const AdminDoctors = () => {
       setDoctors(updatedDoctors);
       setData(STORAGE_KEYS.DOCTORS, updatedDoctors);
 
-      // 3. Update Users State (Credentials)
+      // 3. Update Users State (Credentials) — always save email & password
       let updatedUsers = [...users];
       const existingUserIndex = users.findIndex(u => u.id === docId);
 
       if (existingUserIndex >= 0) {
-        // Update existing user
+        // Update existing user — always overwrite with form values
         updatedUsers[existingUserIndex] = {
           ...updatedUsers[existingUserIndex],
           name: form.name,
-          email: form.email || updatedUsers[existingUserIndex].email,
-          password: form.password || updatedUsers[existingUserIndex].password,
+          email: finalEmail,
+          password: finalPassword,
         };
       } else {
         // Create new user
         updatedUsers.push({
           id: docId,
-          email: form.email || `doctor${docId}@test.com`,
-          password: form.password || 'doctor123',
+          email: finalEmail,
+          password: finalPassword,
           name: form.name,
           role: 'doctor',
           phone: '',
@@ -203,7 +228,7 @@ const AdminDoctors = () => {
 
       setUsers(updatedUsers);
       setData(STORAGE_KEYS.USERS, updatedUsers);
-      toast.success(editing ? "Doctor updated!" : "Doctor created!");
+      toast.success(editing ? "Doctor updated!" : "Doctor created with credentials!");
 
     } catch (error) {
       console.error("Save error:", error);
@@ -216,6 +241,38 @@ const AdminDoctors = () => {
 
     setIsOpen(false);
     setEditing(null);
+  };
+
+  const handleDelete = (doctor: Doctor) => {
+    setDoctorToDelete(doctor);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!doctorToDelete) return;
+
+    // 1. Remove from Doctors
+    const updatedDoctors = doctors.filter(d => d.id !== doctorToDelete.id);
+    setDoctors(updatedDoctors);
+    setData(STORAGE_KEYS.DOCTORS, updatedDoctors);
+
+    // 2. Remove associated user credentials
+    const updatedUsers = users.filter(u => u.id !== doctorToDelete.id);
+    setUsers(updatedUsers);
+    setData(STORAGE_KEYS.USERS, updatedUsers);
+
+    // 3. Remove from Supabase if real UUID
+    if (isUUID(doctorToDelete.id)) {
+      try {
+        await supabase.from('profiles').delete().eq('id', doctorToDelete.id);
+      } catch (e) {
+        console.error('Supabase delete error:', e);
+      }
+    }
+
+    toast.success(`Dr. ${doctorToDelete.name} has been removed.`);
+    setDeleteDialogOpen(false);
+    setDoctorToDelete(null);
   };
 
   const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
@@ -378,6 +435,15 @@ const AdminDoctors = () => {
                         }}
                       >
                         <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                        title="Delete Doctor"
+                        onClick={() => handleDelete(d)}
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
@@ -547,6 +613,24 @@ const AdminDoctors = () => {
             </DialogHeader>
           </DialogContent>
         </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Doctor</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete <strong>{doctorToDelete?.name}</strong>? This will permanently remove their profile and login credentials. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => { setDeleteDialogOpen(false); setDoctorToDelete(null); }}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Delete Doctor
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </main>
     </div>
   );

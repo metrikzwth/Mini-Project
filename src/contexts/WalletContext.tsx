@@ -126,10 +126,12 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                 const currentUser = users.find(u => u.id === user.id);
                 setBalance(currentUser?.balance || 0);
 
-                // We don't really track transactions for mock users in this simple version, 
-                // but we could store them in a separate key if needed. 
-                // For now, empty transactions list is fine or we can mock it.
-                setTransactions([]);
+                // Read local transactions for this user
+                const allLocalTxns = getData<Transaction[]>(STORAGE_KEYS.TRANSACTIONS, []);
+                const userTxns = allLocalTxns
+                    .filter(t => (t as any).userId === user.id)
+                    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                setTransactions(userTxns);
             }
 
         } catch (error) {
@@ -172,7 +174,19 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                 }
 
                 setData(STORAGE_KEYS.USERS, updatedUsers);
-                // toast.success("Local wallet updated"); 
+
+                // Record transaction in localStorage
+                const txn: Transaction & { userId: string } = {
+                    id: `TXN${Date.now()}`,
+                    amount,
+                    type,
+                    description,
+                    created_at: new Date().toISOString(),
+                    userId: targetId,
+                };
+                const allTxns = getData<any[]>(STORAGE_KEYS.TRANSACTIONS, []);
+                allTxns.push(txn);
+                setData(STORAGE_KEYS.TRANSACTIONS, allTxns);
             }
 
             if (!targetUserId || targetUserId === user?.id) {
@@ -215,6 +229,19 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                     return u;
                 });
                 setData(STORAGE_KEYS.USERS, updatedUsers);
+
+                // Record transaction in localStorage
+                const txn: Transaction & { userId: string } = {
+                    id: `TXN${Date.now()}`,
+                    amount: -amount,
+                    type,
+                    description,
+                    created_at: new Date().toISOString(),
+                    userId: targetId,
+                };
+                const allTxns = getData<any[]>(STORAGE_KEYS.TRANSACTIONS, []);
+                allTxns.push(txn);
+                setData(STORAGE_KEYS.TRANSACTIONS, allTxns);
             }
 
             if (!targetUserId || targetUserId === user?.id) {

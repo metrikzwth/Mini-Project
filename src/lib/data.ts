@@ -355,6 +355,7 @@ const STORAGE_KEYS = {
   USERS: "medicare_users",
   CURRENT_USER: "medicare_current_user",
   CART: "medicare_cart",
+  TRANSACTIONS: "medicare_transactions",
 };
 
 // Data access functions
