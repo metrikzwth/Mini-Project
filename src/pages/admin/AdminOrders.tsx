@@ -9,8 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getData, setData, STORAGE_KEYS, Order } from "@/lib/data";
-import { syncOrderStatusToSupabase, deleteOrderFromSupabase } from "@/lib/supabaseSync";
+import { getData, setData, STORAGE_KEYS, Order, hideItemForUser, getHiddenItems } from "@/lib/data";
+import { syncOrderStatusToSupabase } from "@/lib/supabaseSync";
 import { Package, MapPin, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -18,11 +18,20 @@ import { cn } from "@/lib/utils";
 import { useWallet } from "@/contexts/WalletContext";
 
 const AdminOrders = () => {
-  const [orders, setOrders] = useState<Order[]>(
-    getData(STORAGE_KEYS.ORDERS, []),
-  );
+  const [orders, setOrders] = useState<Order[]>(() => {
+    const all = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
+    const hidden = getHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, 'admin');
+    return all.filter(o => !hidden.includes(o.id))
+      .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
+  });
 
   const { addCredits } = useWallet();
+
+  const triggerLiveUpdate = () => {
+    const channel = new BroadcastChannel('medicare_data_updates');
+    channel.postMessage({ type: 'update' });
+    channel.close();
+  };
 
   const refundToPatient = async (order: Order) => {
     const patientId = order.patientId;
@@ -57,35 +66,50 @@ const AdminOrders = () => {
     return false;
   };
 
+  const handleManualRefund = async (order: Order) => {
+    if (!confirm("Are you sure you want to issue a refund for this cancelled order?")) return;
+    toast.info("Processing manual refund...");
+    const refunded = await refundToPatient(order);
+    if (refunded) {
+      const updated = orders.map(o => o.id === order.id ? { ...o, isRefunded: true } : o);
+      setOrders(updated);
+      setData(STORAGE_KEYS.ORDERS, updated);
+      triggerLiveUpdate();
+      toast.success("Refund status updated for order.");
+    }
+  };
+
   const updateStatus = async (id: string, status: Order["status"]) => {
     const orderToUpdate = orders.find(o => o.id === id);
 
     // Handle Refund on Cancellation
+    let isRefundedNow = orderToUpdate?.isRefunded || false;
     if (status === 'Cancelled' && orderToUpdate?.status !== 'Cancelled' && orderToUpdate?.paymentMethod === 'wallet') {
-      if (confirm("This order was paid via Wallet. Do you want to process a refund to the patient?")) {
+      if (confirm("This order was paid via Wallet. Do you want to process a refund to the patient now?")) {
         toast.info("Processing refund...");
         const refunded = await refundToPatient(orderToUpdate);
         if (!refunded) {
           toast.error("Refund failed. Status update cancelled.");
           return;
         }
+        isRefundedNow = true;
       }
     }
 
-    const updated = orders.map((o) => (o.id === id ? { ...o, status } : o));
+    const updated = orders.map((o) => (o.id === id ? { ...o, status, isRefunded: isRefundedNow } : o));
     setOrders(updated);
     setData(STORAGE_KEYS.ORDERS, updated);
     syncOrderStatusToSupabase(id, status);
+    triggerLiveUpdate();
     toast.success("Order status updated!");
   };
 
   const handleDelete = (id: string) => {
-    if (!confirm("Are you sure you want to delete this order?")) return;
-    const updated = orders.filter((o) => o.id !== id);
-    setOrders(updated);
-    setData(STORAGE_KEYS.ORDERS, updated);
-    deleteOrderFromSupabase(id);
-    toast.success("Order deleted");
+    if (!confirm("Remove this order from your view? (Archiving it will keep it in your Revenue history)")) return;
+    hideItemForUser(STORAGE_KEYS.HIDDEN_ORDERS, 'admin', id);
+    setOrders(prev => prev.filter((o) => o.id !== id));
+    triggerLiveUpdate();
+    toast.success("Order archived from view");
   };
 
   return (
@@ -122,6 +146,16 @@ const AdminOrders = () => {
                         <SelectItem value="Cancelled">Cancelled</SelectItem>
                       </SelectContent>
                     </Select>
+                    {o.status === 'Cancelled' && o.paymentMethod === 'wallet' && !o.isRefunded && (
+                      <Button variant="outline" size="sm" onClick={() => handleManualRefund(o)} className="text-green-600 border-green-200 hover:bg-green-50 mr-2">
+                        Issue Refund
+                      </Button>
+                    )}
+                    {o.status === 'Cancelled' && o.paymentMethod === 'wallet' && o.isRefunded && (
+                      <Badge variant="outline" className="text-green-600 bg-green-50 mr-2 h-9 flex items-center px-3">
+                        Refunded
+                      </Badge>
+                    )}
                     <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(o.id)}>
                       <Trash2 className="w-4 h-4" />
                     </Button>

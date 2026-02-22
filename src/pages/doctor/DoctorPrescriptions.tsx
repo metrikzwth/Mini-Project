@@ -6,25 +6,38 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { getData, setData, STORAGE_KEYS, Prescription, User, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
-import { FileText, Plus, Trash2 } from 'lucide-react';
+import { getData, setData, STORAGE_KEYS, Prescription, User, Appointment, hideItemForUser, getHiddenItems } from '@/lib/data';
+import { syncPrescriptionToSupabase } from '@/lib/supabaseSync';
+import { FileText, Plus, Trash2, CheckCircle, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 const DoctorPrescriptions = () => {
   const { user } = useAuth();
-  const patients = getData<User[]>(STORAGE_KEYS.USERS, []).filter(u => u.role === 'patient');
+  const mockPatients = getData<User[]>(STORAGE_KEYS.USERS, []).filter(u => u.role === 'patient');
+  const docAppointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []).filter(a => a.doctorId === user?.id);
+  const allPatientsMap = new Map();
+  mockPatients.forEach(p => allPatientsMap.set(p.id, { id: p.id, name: p.name }));
+  docAppointments.forEach(a => allPatientsMap.set(a.patientId, { id: a.patientId, name: a.patientName }));
+  const patients = Array.from(allPatientsMap.values());
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
 
   useEffect(() => {
     if (user) {
-      const hiddenIds = getHiddenItems(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user.id);
+      const hiddenIds = getHiddenItems(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, 'doctor_' + user.id);
       const allRx = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
       setPrescriptions(allRx.filter(p => (p.doctorId === user.id || p.doctorName === user.name) && !hiddenIds.includes(p.id)));
     }
   }, [user]);
 
-  const [form, setForm] = useState({ patientId: '', diagnosis: '', notes: '', medicines: [{ name: '', dosage: '', duration: '', instructions: '' }] });
+  const [form, setForm] = useState({
+    patientId: '', diagnosis: '', notes: '',
+    medicines: [{ name: '', dosage: '', duration: '', instructions: '' }],
+    attachment: null as { name: string, data: string, type: string } | null
+  });
+
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const addMedicine = () => setForm({ ...form, medicines: [...form.medicines, { name: '', dosage: '', duration: '', instructions: '' }] });
   const removeMedicine = (i: number) => setForm({ ...form, medicines: form.medicines.filter((_, idx) => idx !== i) });
@@ -34,10 +47,31 @@ const DoctorPrescriptions = () => {
     setForm({ ...form, medicines: meds });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("File limit is 2MB to ensure safe storage.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm(prev => ({ ...prev, attachment: { name: file.name, type: file.type.includes('pdf') ? 'pdf' : 'image', data: reader.result as string } }));
+      toast.success(`Attached ${file.name}`);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const initiateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const patient = patients.find(p => p.id === form.patientId);
-    if (!patient || !form.diagnosis) { toast.error('Fill all fields'); return; }
+    if (!patient || !form.diagnosis) { toast.error('Fill all mandatory fields'); return; }
+    setShowConfirm(true);
+  };
+
+  const handleConfirmSubmit = () => {
+    const patient = patients.find(p => p.id === form.patientId);
+    if (!patient) return;
 
     const newRx: Prescription = {
       id: `RX${Date.now()}`, patientId: form.patientId, patientName: patient.name,
@@ -45,20 +79,32 @@ const DoctorPrescriptions = () => {
       date: new Date().toISOString().split('T')[0],
       consultationTime: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
       diagnosis: form.diagnosis,
-      medicines: form.medicines.filter(m => m.name), notes: form.notes
+      medicines: form.medicines.filter(m => m.name), notes: form.notes,
+      attachment: form.attachment || undefined
     };
 
     const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
     all.push(newRx);
     setData(STORAGE_KEYS.PRESCRIPTIONS, all);
+    syncPrescriptionToSupabase(newRx);
     setPrescriptions([newRx, ...prescriptions]);
-    setForm({ patientId: '', diagnosis: '', notes: '', medicines: [{ name: '', dosage: '', duration: '', instructions: '' }] });
-    toast.success('Prescription created!');
+    setForm({ patientId: '', diagnosis: '', notes: '', medicines: [{ name: '', dosage: '', duration: '', instructions: '' }], attachment: null });
+    setShowConfirm(false);
+
+    // Force global broadcast so the patient's portal refetches
+    window.dispatchEvent(new Event('localDataUpdate'));
+    try {
+      const channel = new BroadcastChannel('medicare_data_updates');
+      channel.postMessage({ type: 'update' });
+      channel.close();
+    } catch (e) { console.error('Broadcast failed', e); }
+
+    toast.success('Prescription safely verified and recorded!');
   };
 
   const handleDeletePrescription = (rxId: string) => {
     if (!confirm('Are you sure you want to remove this prescription from your list?')) return;
-    hideItemForUser(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user?.id || '', rxId);
+    hideItemForUser(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, 'doctor_' + (user?.id || ''), rxId);
     setPrescriptions(prev => prev.filter(r => r.id !== rxId));
     toast.success('Prescription removed from your list');
   };
@@ -72,7 +118,7 @@ const DoctorPrescriptions = () => {
           <Card className="border-2">
             <CardHeader><CardTitle>Create Prescription</CardTitle></CardHeader>
             <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form className="space-y-4">
                 <div><Label>Patient</Label>
                   <Select value={form.patientId} onValueChange={v => setForm({ ...form, patientId: v })}>
                     <SelectTrigger><SelectValue placeholder="Select patient" /></SelectTrigger>
@@ -94,7 +140,23 @@ const DoctorPrescriptions = () => {
                   <Button type="button" variant="outline" size="sm" className="mt-2" onClick={addMedicine}><Plus className="w-4 h-4 mr-1" /> Add Medicine</Button>
                 </div>
                 <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
-                <Button type="submit" className="w-full">Create Prescription</Button>
+
+                <div>
+                  <Label>Optional Attachment (PDF/Image)</Label>
+                  <div className="flex items-center gap-4 mt-1">
+                    <Input type="file" accept="application/pdf,image/*" onChange={handleFileUpload} className="cursor-pointer file:cursor-pointer" />
+                    {form.attachment && (
+                      <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-1.5 rounded-md border border-green-200">
+                        <CheckCircle className="w-4 h-4" />
+                        <span className="truncate max-w-[150px]">{form.attachment.name}</span>
+                        <Button type="button" variant="ghost" size="sm" className="h-4 w-4 p-0 ml-1 text-green-600 hover:text-green-800 hover:bg-transparent" onClick={() => setForm(f => ({ ...f, attachment: null }))}>
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <Button type="button" onClick={initiateSubmit} className="w-full">Review & Create Prescription</Button>
               </form>
             </CardContent>
           </Card>
@@ -122,6 +184,65 @@ const DoctorPrescriptions = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* Confirmation Dialog */}
+        <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
+          <DialogContent className="bg-card max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-primary" />
+                Confirm Prescription Details
+              </DialogTitle>
+              <DialogDescription>
+                Please review the prescription thoroughly before creating it. This ensures patient safety.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Patient</p>
+                  <p className="font-semibold">{patients.find(p => p.id === form.patientId)?.name}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Diagnosis</p>
+                  <p className="font-semibold">{form.diagnosis}</p>
+                </div>
+              </div>
+
+              <div className="border border-border rounded-lg p-3 bg-muted/30">
+                <p className="text-sm font-medium text-muted-foreground mb-2">Prescribed Medicines ({form.medicines.filter(m => m.name).length})</p>
+                <div className="space-y-2">
+                  {form.medicines.filter(m => m.name).map((med, i) => (
+                    <div key={i} className="flex flex-col text-sm border-b border-border/50 pb-2 last:border-0 last:pb-0">
+                      <span className="font-semibold text-foreground">{med.name}</span>
+                      <span className="text-muted-foreground">{med.dosage} • {med.duration}</span>
+                      {med.instructions && <span className="text-xs italic text-muted-foreground/80 mt-0.5">Note: {med.instructions}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {form.notes && (
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Doctor Notes</p>
+                  <p className="text-sm p-2 bg-muted rounded-lg mt-1">{form.notes}</p>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setShowConfirm(false)}>
+                Go Back & Edit
+              </Button>
+              <Button onClick={handleConfirmSubmit}>
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Confirm & Issue
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </main>
     </div>
   );

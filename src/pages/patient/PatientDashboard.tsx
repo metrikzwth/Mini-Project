@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -5,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getData, STORAGE_KEYS, Appointment, Order, Doctor } from '@/lib/data';
 import {
   Pill,
@@ -15,11 +17,28 @@ import {
   Clock,
   ArrowRight,
   Heart,
-  Activity
+  Activity,
+  User as UserIcon
 } from 'lucide-react';
 
 const PatientDashboard = () => {
   const { user } = useAuth();
+  const [, forceUpdate] = useState(0);
+  const [selectedAttachment, setSelectedAttachment] = useState<{ name: string, data: string, type: string } | null>(null);
+
+  useEffect(() => {
+    const handleUpdate = () => forceUpdate(n => n + 1);
+    window.addEventListener('localDataUpdate', handleUpdate);
+    const channel = new BroadcastChannel('medicare_data_updates');
+    channel.onmessage = (event) => {
+      if (event.data.type === 'update') handleUpdate();
+    };
+    return () => {
+      window.removeEventListener('localDataUpdate', handleUpdate);
+      channel.close();
+    };
+  }, []);
+
   const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
     .filter(a => a.patientId === user?.id && a.status !== 'cancelled');
   const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []); // Fetch doctors for images
@@ -27,7 +46,13 @@ const PatientDashboard = () => {
     .filter(o => o.patientId === user?.id);
 
   const upcomingAppointments = appointments.filter(a => a.status === 'confirmed' || a.status === 'pending');
-  const activeOrders = orders.filter(o => o.status !== 'delivered' && o.status !== 'cancelled');
+  const activeOrders = orders.filter(o => {
+    const status = o.status?.toLowerCase() || '';
+    return status !== 'delivered' && status !== 'cancelled';
+  });
+  const allPrescriptions = getData<any[]>(STORAGE_KEYS.PRESCRIPTIONS, [])
+    .filter(p => p.patientId === user?.id)
+    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
 
   const quickActions = [
     { icon: Pill, label: 'Order Medicines', path: '/patient/medicines', color: 'bg-primary' },
@@ -186,38 +211,91 @@ const PatientDashboard = () => {
           </Card>
         </div>
 
-        {/* Health Tips */}
+        {/* Recent Prescriptions */}
         <Card className="border-2 mt-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Heart className="w-5 h-5 text-destructive" />
-              Health Tips
-            </CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-info" />
+                Recent Prescriptions
+              </CardTitle>
+              <CardDescription>Your latest medical prescriptions</CardDescription>
+            </div>
+            <Link to="/patient/history">
+              <Button variant="ghost" size="sm">
+                View All <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            </Link>
           </CardHeader>
           <CardContent>
-            <div className="grid md:grid-cols-3 gap-4">
-              <div className="p-4 bg-primary/5 rounded-lg border border-primary/20">
-                <Activity className="w-8 h-8 text-primary mb-3" />
-                <h4 className="font-semibold text-foreground mb-1">Stay Active</h4>
-                <p className="text-sm text-muted-foreground">30 minutes of daily exercise can improve your overall health</p>
+            {allPrescriptions.length > 0 ? (
+              <div className="space-y-4">
+                {allPrescriptions.slice(0, 3).map((rx) => (
+                  <div key={rx.id} className="flex items-center justify-between p-4 bg-muted rounded-lg border">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-info/10 rounded-full flex items-center justify-center">
+                        <FileText className="w-6 h-6 text-info" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-foreground">{rx.diagnosis}</p>
+                        <p className="text-sm text-muted-foreground flex items-center gap-1">
+                          <UserIcon className="w-3 h-3" /> {rx.doctorName} • <Calendar className="w-3 h-3 ml-1" /> {rx.date}
+                        </p>
+                      </div>
+                    </div>
+                    {rx.attachment && (
+                      <Button variant="outline" size="sm" onClick={() => setSelectedAttachment(rx.attachment)} className="ml-4 shrink-0">
+                        <FileText className="w-4 h-4 mr-2" />
+                        Attachment
+                      </Button>
+                    )}
+                  </div>
+                ))}
               </div>
-              <div className="p-4 bg-secondary/5 rounded-lg border border-secondary/20">
-                <Clock className="w-8 h-8 text-secondary mb-3" />
-                <h4 className="font-semibold text-foreground mb-1">Take Medicines On Time</h4>
-                <p className="text-sm text-muted-foreground">Set reminders to never miss your medication schedule</p>
+            ) : (
+              <div className="text-center py-8">
+                <FileText className="w-12 h-12 text-muted-foreground/50 mx-auto mb-3" />
+                <p className="text-muted-foreground">No recent prescriptions</p>
+                <Link to="/patient/appointments">
+                  <Button variant="outline" className="mt-4">
+                    Consult a Doctor
+                  </Button>
+                </Link>
               </div>
-              <div className="p-4 bg-accent/5 rounded-lg border border-accent/20">
-                <Heart className="w-8 h-8 text-accent mb-3" />
-                <h4 className="font-semibold text-foreground mb-1">Regular Check-ups</h4>
-                <p className="text-sm text-muted-foreground">Schedule regular consultations with your doctor</p>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </main>
 
+      {/* Attachment Viewer Dialog */}
+      <Dialog open={!!selectedAttachment} onOpenChange={(open) => !open && setSelectedAttachment(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+          <DialogHeader className="p-4 bg-muted/50 border-b shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-primary" />
+              {selectedAttachment?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto bg-black/5 p-4 flex items-center justify-center min-h-[500px]">
+            {selectedAttachment?.type === 'pdf' ? (
+              <iframe
+                src={`${selectedAttachment.data}#toolbar=0`}
+                className="w-full h-full min-h-[500px] border-0 rounded bg-white shadow-sm"
+                title={selectedAttachment.name}
+              />
+            ) : selectedAttachment?.type === 'image' ? (
+              <img
+                src={selectedAttachment.data}
+                alt={selectedAttachment.name}
+                className="max-w-full max-h-[calc(90vh-100px)] object-contain rounded shadow-sm"
+              />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <MedicineChatbot />
-    </div>
+    </div >
   );
 };
 

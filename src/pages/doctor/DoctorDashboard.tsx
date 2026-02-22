@@ -23,7 +23,24 @@ const DoctorDashboard = () => {
     .filter(a => a.doctorName === user?.name);
   const users = getData<User[]>(STORAGE_KEYS.USERS, []);
 
-  const todayAppointments = appointments.filter(a => a.status === 'confirmed' || a.status === 'pending');
+  const todayAppointments = appointments
+    .filter(a => a.status === 'confirmed' || a.status === 'pending')
+    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
+
+  const [, forceUpdate] = useState(0);
+
+  useEffect(() => {
+    const handleUpdate = () => forceUpdate(n => n + 1);
+    window.addEventListener('localDataUpdate', handleUpdate);
+    const channel = new BroadcastChannel('medicare_data_updates');
+    channel.onmessage = (event) => {
+      if (event.data.type === 'update') handleUpdate();
+    };
+    return () => {
+      window.removeEventListener('localDataUpdate', handleUpdate);
+      channel.close();
+    };
+  }, []);
   const completedToday = appointments.filter(a => a.status === 'completed').length;
 
   // Removed manual useEffect fetch

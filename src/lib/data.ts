@@ -61,6 +61,7 @@ export interface Order {
   deliveryAddress: string;
   paymentMethod?: "wallet" | "cod";
   transactionId?: string;
+  isRefunded?: boolean;
 }
 
 export interface Prescription {
@@ -79,6 +80,11 @@ export interface Prescription {
   diagnosis: string;
   notes?: string;
   consultationTime?: string; // Time of consultation, e.g. "10:00 AM"
+  attachment?: {
+    name: string;
+    data: string;
+    type: string;
+  };
 }
 
 export interface User {
@@ -421,6 +427,25 @@ export const initializeData = () => {
   }
   if (!localStorage.getItem(STORAGE_KEYS.ORDERS)) {
     setData(STORAGE_KEYS.ORDERS, []);
+  } else {
+    // Migration: Fix any stuck 'Feb 17' or other hardcoded mocked dates in existing orders
+    try {
+      const existingOrders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
+      let hasChanges = false;
+      const fixedOrders = existingOrders.map(o => {
+        if (o.orderDate && o.orderDate.includes('Feb 17')) {
+          hasChanges = true;
+          // Set it to current real time
+          return { ...o, orderDate: new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) };
+        }
+        return o;
+      });
+      if (hasChanges) {
+        setData(STORAGE_KEYS.ORDERS, fixedOrders);
+      }
+    } catch (e) {
+      console.error("Migration failed", e);
+    }
   }
   if (!localStorage.getItem(STORAGE_KEYS.PRESCRIPTIONS)) {
     setData(STORAGE_KEYS.PRESCRIPTIONS, []);

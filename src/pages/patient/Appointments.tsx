@@ -28,10 +28,12 @@ const Appointments = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { balance, deductCredits, transferCredits } = useWallet();
-  const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []).filter(d => d.isActive);
+  const allDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []).filter(d => d.isActive);
+  const doctors = Array.from(new Map(allDocs.map(d => [d.name.toLowerCase().trim(), d])).values());
   const [myAppointments, setMyAppointments] = useState<Appointment[]>(
     getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
       .filter(a => a.patientId === user?.id && (a.status === 'pending' || a.status === 'confirmed'))
+      .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0))
   );
 
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
@@ -41,7 +43,7 @@ const Appointments = () => {
     time: '',
     type: 'video' as 'video' | 'in-person'
   });
-  const [payWithWallet, setPayWithWallet] = useState(false);
+  const [payWithWallet, setPayWithWallet] = useState(true);
 
   const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
@@ -64,11 +66,12 @@ const Appointments = () => {
     if (payWithWallet) {
       let success = false;
 
-      // Always use transferCredits, which handles both Local and DB users correctly
-      success = await transferCredits(
+      // Only deduct from patient instead of transferring to doctor immediately
+      success = await deductCredits(
         selectedDoctor.fee,
-        selectedDoctor.id,
-        `Consultation with ${selectedDoctor.name}`
+        `Payment reserved for consultation with ${selectedDoctor.name}`,
+        user?.id,
+        'purchase'
       );
 
       if (!success) {
@@ -98,7 +101,10 @@ const Appointments = () => {
     setData(STORAGE_KEYS.APPOINTMENTS, appointments);
     syncAppointmentToSupabase(newAppointment);
 
-    setMyAppointments(prev => [...prev, newAppointment].filter(a => a.status === 'pending' || a.status === 'confirmed'));
+    setMyAppointments(prev => [...prev, newAppointment]
+      .filter(a => a.status === 'pending' || a.status === 'confirmed')
+      .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0))
+    );
     setSelectedDoctor(null);
     setBookingData({ date: '', time: '', type: 'video' });
     setPayWithWallet(false);
@@ -275,7 +281,7 @@ const Appointments = () => {
 
               <div className="space-y-2">
                 <Label>Consultation Type</Label>
-                <Select value={bookingData.type} onValueChange={(value: 'video' | 'in-person') => { setBookingData({ ...bookingData, type: value }); if (value === 'in-person') setPayWithWallet(false); }}>
+                <Select value={bookingData.type} onValueChange={(value: 'video' | 'in-person') => { setBookingData({ ...bookingData, type: value }); if (value === 'in-person') setPayWithWallet(false); else setPayWithWallet(true); }}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -292,21 +298,20 @@ const Appointments = () => {
                   <input
                     type="checkbox"
                     id="payWithWalletApt"
-                    checked={payWithWallet}
-                    onChange={(e) => setPayWithWallet(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                    disabled={balance < (selectedDoctor?.fee || 0)}
+                    checked={true}
+                    readOnly
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary opacity-50 cursor-not-allowed"
                   />
                   <div className="grid gap-1.5 leading-none">
                     <label
                       htmlFor="payWithWalletApt"
-                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                      className="text-sm font-medium leading-none text-muted-foreground"
                     >
-                      Pay with Wallet
+                      Pay with Wallet (Mandatory for Video)
                     </label>
                     <p className="text-xs text-muted-foreground">
                       Balance: ${balance.toFixed(2)}
-                      {balance < (selectedDoctor?.fee || 0) && <span className="text-destructive ml-1">(Insufficient)</span>}
+                      {balance < (selectedDoctor?.fee || 0) && <span className="text-destructive ml-1 font-semibold">(Insufficient Balance)</span>}
                     </p>
                   </div>
                 </div>

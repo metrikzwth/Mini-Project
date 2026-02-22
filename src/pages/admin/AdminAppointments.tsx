@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AdminSidebar from "@/components/layout/AdminSidebar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,26 @@ const AdminAppointments = () => {
   const [appointments, setAppointments] = useState<Appointment[]>(
     () => getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
   );
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setAppointments(getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []));
+    };
+
+    window.addEventListener('localDataUpdate', handleUpdate);
+    const channel = new BroadcastChannel('medicare_data_updates');
+    channel.onmessage = (event) => {
+      if (event.data.type === 'update') {
+        handleUpdate();
+      }
+    };
+
+    return () => {
+      window.removeEventListener('localDataUpdate', handleUpdate);
+      channel.close();
+    };
+  }, []);
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -24,15 +44,30 @@ const AdminAppointments = () => {
     toast.success("Appointment deleted successfully");
   };
 
+  const sortedAppointments = [...appointments].sort((a, b) => {
+    const timeA = parseInt(a.id.replace(/\D/g, '')) || 0;
+    const timeB = parseInt(b.id.replace(/\D/g, '')) || 0;
+    return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
+  });
+
   return (
     <div className="min-h-screen bg-background m-5">
       <AdminSidebar />
       <main className={cn("transition-all pt-16 lg:pt-0 lg:pl-64", "p-8")}>
-        <h1 className="text-3xl font-bold text-foreground mb-8">
-          Appointments
-        </h1>
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold text-foreground">
+            Appointments
+          </h1>
+          <Button
+            variant="outline"
+            onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+            className="flex items-center gap-2"
+          >
+            Sort by Initiated Time: {sortOrder === 'desc' ? 'Newest First' : 'Oldest First'}
+          </Button>
+        </div>
         <div className="space-y-4">
-          {appointments.map((a) => (
+          {sortedAppointments.map((a) => (
             <Card key={a.id} className="border-2 group">
               <CardContent className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -40,9 +75,14 @@ const AdminAppointments = () => {
                     <User className="w-6 h-6 text-primary" />
                   </div>
                   <div>
-                    <p className="font-semibold">
-                      {a.patientName} → {a.doctorName}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold">
+                        {a.patientName} → {a.doctorName}
+                      </p>
+                      <Badge variant="outline" className="text-xs">
+                        {a.type === 'video' ? '📹 Video' : '🏥 In-Person'}
+                      </Badge>
+                    </div>
                     <p className="text-sm text-muted-foreground flex items-center gap-2">
                       <Calendar className="w-4 h-4" /> {a.date}{" "}
                       <Clock className="w-4 h-4" /> {a.time}

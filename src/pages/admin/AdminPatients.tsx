@@ -25,6 +25,7 @@ import { getData, setData, STORAGE_KEYS, User, dataChannel } from "@/lib/data";
 import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useWallet } from "@/contexts/WalletContext";
 
 interface PatientWithBalance extends User {
     balance?: number;
@@ -44,6 +45,8 @@ const AdminPatients = () => {
     const [walletAmount, setWalletAmount] = useState("");
     const [walletAction, setWalletAction] = useState<'add' | 'deduct'>('add');
     const [processingWallet, setProcessingWallet] = useState(false);
+
+    const { addCredits, deductCredits } = useWallet();
 
     useEffect(() => {
         loadPatients();
@@ -132,10 +135,13 @@ const AdminPatients = () => {
 
                 if (result && result.data) {
                     const wallets = result.data;
-                    allPatients = allPatients.map(p => ({
-                        ...p,
-                        balance: wallets.find((w: any) => w.user_id === p.id)?.balance || 0
-                    }));
+                    allPatients = allPatients.map(p => {
+                        const dbWallet = wallets.find((w: any) => w.user_id === p.id);
+                        return {
+                            ...p,
+                            balance: dbWallet ? dbWallet.balance : (p.balance || 0)
+                        };
+                    });
                 }
             } catch (err) {
                 console.log("Wallet sync failed or timed out", err);
@@ -151,7 +157,17 @@ const AdminPatients = () => {
     };
 
     const handleDelete = async (userId: string) => {
-        if (!confirm("Are you sure you want to terminate this patient's account?")) return;
+        if (!confirm("Are you sure you want to terminate this patient's account? This action is permanent and they will not be able to log in with this email again.")) return;
+
+        // Block email permanently
+        const patientObj = patients.find(p => p.id === userId);
+        if (patientObj?.email) {
+            const banned = getData<string[]>('BANNED_EMAILS', []);
+            if (!banned.includes(patientObj.email)) {
+                banned.push(patientObj.email);
+                setData('BANNED_EMAILS', banned);
+            }
+        }
 
         const allUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
         const updatedUsers = allUsers.filter(u => u.id !== userId);
@@ -166,7 +182,7 @@ const AdminPatients = () => {
             }
         }
 
-        toast.success("Patient account terminated");
+        toast.success("Patient account permanently terminated");
         loadPatients();
     };
 
@@ -230,58 +246,18 @@ const AdminPatients = () => {
 
         setProcessingWallet(true);
         try {
-            // Handle Local User (Mock)
-            if (!isUUID(editingUser.id)) {
-                const allUsers = getData<any[]>(STORAGE_KEYS.USERS, []);
-                const updatedUsers = allUsers.map(u => {
-                    if (u.id === editingUser.id) {
-                        const currentBalance = u.balance || 0;
-                        const newBalance = walletAction === 'add'
-                            ? currentBalance + amount
-                            : Math.max(0, currentBalance - amount);
-                        return { ...u, balance: newBalance };
-                    }
-                    return u;
-                });
-                setData(STORAGE_KEYS.USERS, updatedUsers);
-
-                toast.success("Wallet balance updated (Local)");
-                setWalletAmount("");
-                setEditingUser(prev => prev ? ({
-                    ...prev,
-                    balance: walletAction === 'add'
-                        ? (prev.balance || 0) + amount
-                        : Math.max(0, (prev.balance || 0) - amount)
-                }) : null);
-                await loadPatients();
-                return;
-            }
-
-            // Handle Real DB User
             const description = `Admin Adjustment: ${walletAction === 'add' ? 'Credit' : 'Debit'} via Patient Management`;
-            const rpcName = walletAction === 'add' ? 'add_credits' : 'deduct_credits';
-
-            const params: any = {
-                target_user_id: editingUser.id,
-                txn_description: description
-            };
+            let success = false;
 
             if (walletAction === 'add') {
-                params.credit_amount = amount;
+                success = await addCredits(amount, description, editingUser.id, 'manual_adjustment');
             } else {
-                params.deduct_amount = amount;
-                params.txn_type = 'manual_adjustment';
+                success = await deductCredits(amount, description, editingUser.id, 'manual_adjustment');
             }
 
-            // check allow RPC to process
-            const { error } = await supabase.rpc(rpcName, params);
-
-            if (error) {
-                throw error;
-            } else {
+            if (success) {
                 toast.success("Wallet balance updated successfully");
                 setWalletAmount("");
-                // Update the local state for immediate feedback
                 setEditingUser(prev => prev ? ({
                     ...prev,
                     balance: walletAction === 'add'
@@ -294,10 +270,12 @@ const AdminPatients = () => {
 
                 // Reload to sync everything
                 await loadPatients();
+            } else {
+                throw new Error("Failed to update wallet balance");
             }
         } catch (error: any) {
             console.error("Wallet update error:", error);
-            toast.error(`Failed to update wallet: ${error.message || "Unknown error"}`);
+            // toast error is handled by WalletContext mostly
         } finally {
             setProcessingWallet(false);
         }

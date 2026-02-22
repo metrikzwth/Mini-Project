@@ -6,23 +6,46 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
 import { getData, setData, STORAGE_KEYS, Appointment, User, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
 import { syncAppointmentToSupabase, deleteAppointmentFromSupabase } from '@/lib/supabaseSync';
-import { Calendar, Clock, User as UserIcon, CheckCircle, XCircle, Trash2, Eraser, Video } from 'lucide-react';
+import { Calendar, Clock, User as UserIcon, CheckCircle, XCircle, Trash2, Eraser } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 const DoctorAppointments = () => {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { addCredits, deductCredits } = useWallet();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
 
   useEffect(() => {
-    if (user) {
+    if (!user) return;
+
+    const fetchAppointments = () => {
       const hiddenIds = getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
       const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-      setAppointments(allApts.filter(a => a.doctorName === user.name && !hiddenIds.includes(a.id) && (a.status === 'pending' || a.status === 'confirmed')));
-    }
+      setAppointments(
+        allApts
+          .filter(a => a.doctorName === user.name && !hiddenIds.includes(a.id) && (a.status === 'pending' || a.status === 'confirmed'))
+          .sort((a, b) => {
+            const timeA = parseInt(a.id.replace(/\D/g, '')) || 0;
+            const timeB = parseInt(b.id.replace(/\D/g, '')) || 0;
+            return timeB - timeA;
+          })
+      );
+    };
+
+    fetchAppointments();
+
+    window.addEventListener('localDataUpdate', fetchAppointments);
+    const channel = new BroadcastChannel('medicare_data_updates');
+    channel.onmessage = (event) => {
+      if (event.data.type === 'update') {
+        fetchAppointments();
+      }
+    };
+
+    return () => {
+      window.removeEventListener('localDataUpdate', fetchAppointments);
+      channel.close();
+    };
   }, [user]);
   const users = getData<User[]>(STORAGE_KEYS.USERS, []);
 
@@ -30,43 +53,35 @@ const DoctorAppointments = () => {
     const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
     const appointmentToUpdate = allApts.find(a => a.id === id);
 
+    if (status === 'confirmed' && appointmentToUpdate?.paymentMethod === 'wallet' && appointmentToUpdate.fee) {
+      // Doctor confirms -> Doctor gets paid
+      let success = await addCredits(
+        appointmentToUpdate.fee,
+        `Payment received for consultation with ${appointmentToUpdate.patientName}`,
+        user?.id,
+        'consultation_credit'
+      );
+      if (!success) {
+        toast.error("Failed to credit your wallet. Please try again.");
+        return;
+      }
+    }
+
     if (status === 'cancelled' && appointmentToUpdate?.paymentMethod === 'wallet' && appointmentToUpdate.fee) {
-      // Refund the patient
+      // Refund the patient (Doctor never received it)
       toast.info("Processing refund...");
 
-      let success = false;
-      // If the current user (Doctor) is the one cancelling, we should TRANSFER back to patient.
-      // This maintains the closed loop economy.
-      if (user?.id) {
-        // 1. Deduct from Doctor (Manual Adjustment to reflect refund given)
-        await deductCredits(
-          appointmentToUpdate.fee,
-          `Refund issued to ${appointmentToUpdate.patientName}`,
-          user.id,
-          'manual_adjustment'
-        );
-
-        // 2. Add to Patient (Explicit REFUND type)
-        success = await addCredits(
-          appointmentToUpdate.fee,
-          `Refund for appointment with ${user.name}`,
-          appointmentToUpdate.patientId,
-          'refund'
-        );
-      } else {
-        // Fallback: System Refund (Minting)
-        success = await addCredits(
-          appointmentToUpdate.fee,
-          `Refund for cancelled appointment with ${user.name}`,
-          appointmentToUpdate.patientId,
-          'refund'
-        );
-      }
+      let success = await addCredits(
+        appointmentToUpdate.fee,
+        `Refund for cancelled appointment with ${appointmentToUpdate.doctorName}`,
+        appointmentToUpdate.patientId,
+        'refund'
+      );
 
       if (success) {
         toast.success("Refund processed successfully");
       } else {
-        toast.error("Failed to process refund. Ensure you have sufficient balance.");
+        toast.error("Failed to process refund. System error.");
         return; // Stop cancellation if refund fails
       }
     }
@@ -144,11 +159,6 @@ const DoctorAppointments = () => {
                     )}
                     {apt.status === 'confirmed' && (
                       <div className="flex gap-2">
-                        {apt.type === 'video' && (
-                          <Button size="sm" onClick={() => navigate('/doctor/consultation', { state: { appointmentId: apt.id } })}>
-                            <Video className="w-4 h-4 mr-1" /> Video Call
-                          </Button>
-                        )}
                         <Button size="sm" variant="secondary" onClick={() => updateStatus(apt.id, 'completed')}>
                           <CheckCircle className="w-4 h-4 mr-1" /> Mark Completed
                         </Button>

@@ -160,7 +160,8 @@ const AdminDashboard = () => {
     setOrders(getData<Order[]>(STORAGE_KEYS.ORDERS, []));
     setAppointments(getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []));
     setMedicines(getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []));
-    setDoctors(getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []));
+    const rawDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
+    setDoctors(Array.from(new Map(rawDocs.map(d => [d.name.toLowerCase().trim(), d])).values()));
   };
 
   useEffect(() => {

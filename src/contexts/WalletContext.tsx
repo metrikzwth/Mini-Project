@@ -4,6 +4,8 @@ import { useAuth } from './AuthContext';
 import { toast } from 'sonner';
 import { getData, setData, STORAGE_KEYS } from '@/lib/data';
 
+const dataChannel = new BroadcastChannel('medicare_data_updates');
+
 export interface Transaction {
     id: string;
     amount: number;
@@ -230,9 +232,20 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
             if (!targetUserId || targetUserId === user?.id) {
                 await fetchWalletData();
             }
+            // Force global refresh for other tabs
+            window.dispatchEvent(new Event('localDataUpdate'));
+            try {
+                const channel = new BroadcastChannel('medicare_data_updates');
+                channel.postMessage({ type: 'update' });
+                channel.close();
+            } catch (e) {
+                console.error("Broadcast update failed", e);
+            }
+
+            console.log(`[WalletContext] Successfully finished addCredits of ${amount} to ${targetId}`);
             return true;
         } catch (error: any) {
-            console.error('Error adding credits:', error);
+            console.error('[WalletContext] Error adding credits:', error);
             toast.error(error.message || 'Failed to add credits');
             return false;
         }
@@ -283,6 +296,16 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
             if (!targetUserId || targetUserId === user?.id) {
                 await fetchWalletData();
             }
+            // Force global refresh for other tabs
+            window.dispatchEvent(new Event('localDataUpdate'));
+            try {
+                const channel = new BroadcastChannel('medicare_data_updates');
+                channel.postMessage({ type: 'update' });
+                channel.close();
+            } catch (e) {
+                console.error("Broadcast update failed", e);
+            }
+
             return true;
         } catch (error: any) {
             console.error('Error deducting credits:', error);
@@ -292,13 +315,18 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const transferCredits = async (amount: number, receiverId: string, description: string) => {
-        if (!user) return false;
+        if (!user) {
+            console.error('[WalletContext] transferCredits failed: Missing user');
+            return false;
+        }
+        console.log(`[WalletContext] Initiating transferCredits: ${amount} from ${user.id} to ${receiverId}`);
         try {
             const senderUUID = isUUID(user.id);
             const receiverUUID = isUUID(receiverId);
 
             if (senderUUID && receiverUUID) {
                 // Both Real: Database Transfer
+                console.log(`[WalletContext] Executing pure database RPC transfer from ${user.id} to ${receiverId}`);
                 const { error } = await supabase.rpc('transfer_credits', {
                     sender_id: user.id,
                     receiver_id: receiverId,
@@ -307,48 +335,49 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                     sender_txn_type: 'purchase',
                     receiver_txn_type: 'consultation_credit'
                 });
-                if (error) throw error;
+                if (error) {
+                    console.error('[WalletContext] Pure RPC transfer failed:', error);
+                    throw error;
+                }
 
                 // Manually log for Sender (Patient)
                 await createTransaction(-amount, 'purchase', description, user.id);
-
-                // Manually log for Receiver (Doctor) - Use a slightly different description if possible, or same
-                // For the receiver, we want to know who sent it.
-                // But we only have generic description.
-                // Let's append "(Transfer)" or something, or just use description.
+                // Manually log for Receiver (Doctor)
                 await createTransaction(amount, 'consultation_credit', description, receiverId);
 
             } else {
                 // Hybrid or Local Transfer
+                console.log(`[WalletContext] Executing hybrid fallback transfer from ${user.id} to ${receiverId}`);
                 // 1. Deduct from Sender
-                if (senderUUID) {
-                    await deductCredits(amount, description, user.id, 'purchase');
-                } else {
-                    // Local Sender
-                    await deductCredits(amount, description, user.id, 'purchase');
+                const deductSuccess = await deductCredits(amount, description, user.id, 'purchase');
+                if (!deductSuccess) {
+                    console.error('[WalletContext] Hybrid transfer failed: Sender deduction failed');
+                    throw new Error('Failed to deduct from sender.');
                 }
 
-                // 2. Add to Receiver (Doctor) — use 'consultation_credit' so it shows correctly
-                if (receiverUUID) {
-                    await addCredits(amount, description, receiverId, 'consultation_credit');
-                } else {
-                    // Force a fresh read/write for local receiver
-                    await addCredits(amount, description, receiverId, 'consultation_credit');
+                // 2. Add to Receiver (Doctor) - Explicitly using consultation_credit
+                const addSuccess = await addCredits(amount, description, receiverId, 'consultation_credit');
+                if (!addSuccess) {
+                    // Critical failure state
+                    console.error('[WalletContext] Critical: Failed to add to receiver after deducting from sender!');
+                    throw new Error('Failed to transfer to receiver wallet.');
+                }
 
-                    // Explicitly broadcast update for the receiver if it's not the current user
-                    // This ensures Admin tab picks it up if it's open
-                    if (receiverId !== user.id) {
-                        const channel = new BroadcastChannel('medicare_data_updates');
-                        channel.postMessage({ type: 'update', key: 'medicare_users' });
-                        channel.close();
-                    }
+                // Explicitly broadcast update for the receiver so Admin tabs immediately detect it
+                if (receiverId !== user.id) {
+                    console.log(`[WalletContext] Broadcasting local update for receiver ${receiverId}`);
+                    const channel = new BroadcastChannel('medicare_data_updates');
+                    channel.postMessage({ type: 'update', key: STORAGE_KEYS.USERS }); // General update
+                    channel.postMessage({ type: 'update', key: 'wallet_db_update' }); // Force wallet refetch
+                    channel.close();
                 }
             }
 
+            console.log(`[WalletContext] Finished transferCredits from ${user.id} to ${receiverId} successfully.`);
             await fetchWalletData();
             return true;
         } catch (error: any) {
-            console.error('Error transferring credits:', error);
+            console.error('[WalletContext] Error transferring credits:', error);
             toast.error(error.message || 'Failed to transfer credits');
             return false;
         }

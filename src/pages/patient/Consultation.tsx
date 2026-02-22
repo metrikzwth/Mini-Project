@@ -25,48 +25,40 @@ const Consultation = () => {
   const { user } = useAuth();
   const location = useLocation();
   const stateAppointmentId = (location.state as any)?.appointmentId;
-  // Auto-start call if navigated from Join Consultation button
-  const [isInCall, setIsInCall] = useState(!!stateAppointmentId);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
-  const [callDuration, setCallDuration] = useState(0);
-
   const upcomingAppointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
-    .filter(a => a.patientId === user?.id && (a.status === 'pending' || a.status === 'confirmed'));
+    .filter(a => a.patientId === user?.id && (a.status === 'pending' || a.status === 'confirmed') && a.type === 'video')
+    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
 
-  const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
-  // Use the specific appointment from state, or fall back to first confirmed
-  const activeAppointment = stateAppointmentId
-    ? upcomingAppointments.find(a => a.id === stateAppointmentId) || upcomingAppointments[0]
-    : upcomingAppointments[0];
-  const activeDoctor = activeAppointment ? doctors.find(d => d.id === activeAppointment.doctorId) : null;
+  const [, forceUpdate] = useState(0);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isInCall) {
-      interval = setInterval(() => {
-        setCallDuration(prev => prev + 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isInCall]);
+    const handleUpdate = () => forceUpdate(n => n + 1);
+    window.addEventListener('localDataUpdate', handleUpdate);
+    const channel = new BroadcastChannel('medicare_data_updates');
+    channel.onmessage = (event) => {
+      if (event.data.type === 'update') handleUpdate();
+    };
+    return () => {
+      window.removeEventListener('localDataUpdate', handleUpdate);
+      channel.close();
+    };
+  }, []);
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
+  const [activeAppointmentId, setActiveAppointmentId] = useState<string | null>(stateAppointmentId || null);
+  const [isInCall, setIsInCall] = useState(!!stateAppointmentId);
 
-  const startCall = () => {
+  const activeAppointment = activeAppointmentId
+    ? upcomingAppointments.find(a => a.id === activeAppointmentId)
+    : null;
+
+  const startCall = (aptId: string) => {
+    setActiveAppointmentId(aptId);
     setIsInCall(true);
-    setCallDuration(0);
   };
 
   const endCall = () => {
     setIsInCall(false);
-    setCallDuration(0);
-    setIsMuted(false);
-    setIsVideoOff(false);
+    setActiveAppointmentId(null);
   };
 
   return (
@@ -85,7 +77,7 @@ const Consultation = () => {
           {/* Video Call Area */}
           <div className="lg:col-span-2">
             {isInCall && activeAppointment ? (
-              <div className="h-[500px]">
+              <div className="h-[600px]">
                 <VideoCall
                   appointmentId={activeAppointment.id}
                   role="patient"
@@ -93,24 +85,58 @@ const Consultation = () => {
                 />
               </div>
             ) : (
-              <Card className="border-2 overflow-hidden">
-                <div className="relative aspect-video bg-foreground/5 flex flex-col items-center justify-center">
-                  <Video className="w-20 h-20 text-muted-foreground/50 mb-4" />
-                  <h3 className="text-xl font-semibold text-foreground mb-2">Ready to Connect</h3>
-                  <p className="text-muted-foreground text-center max-w-md mb-6">
-                    Start a video consultation with your doctor. Make sure your camera and microphone are working properly.
-                  </p>
-                  <Button
-                    size="lg"
-                    className="px-8"
-                    onClick={startCall}
-                    disabled={!activeAppointment}
-                  >
-                    <Video className="w-5 h-5 mr-2" />
-                    Join Consultation Room
-                  </Button>
-                </div>
-              </Card>
+              <div className="space-y-4">
+                {upcomingAppointments.length > 0 ? (
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    {upcomingAppointments.map((apt) => (
+                      <Card key={apt.id} className="border-2 hover:border-primary/50 transition-colors">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                                <User className="w-5 h-5 text-primary" />
+                              </div>
+                              <div>
+                                <CardTitle className="text-base">{apt.doctorName}</CardTitle>
+                                <Badge variant="outline" className="text-xs mt-1">
+                                  📹 Video Call
+                                </Badge>
+                              </div>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Calendar className="w-4 h-4" />
+                            <span>{apt.date}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Clock className="w-4 h-4" />
+                            <span>{apt.time}</span>
+                          </div>
+                          <Button
+                            className="w-full mt-2"
+                            onClick={() => startCall(apt.id)}
+                          >
+                            <Video className="w-4 h-4 mr-2" />
+                            Join Call
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <Card className="border-2 overflow-hidden">
+                    <div className="relative aspect-video bg-foreground/5 flex flex-col items-center justify-center py-20">
+                      <Video className="w-20 h-20 text-muted-foreground/50 mb-4" />
+                      <h3 className="text-xl font-semibold text-foreground mb-2">No Upcoming Calls</h3>
+                      <p className="text-muted-foreground text-center max-w-md">
+                        You don't have any confirmed video consultations scheduled.
+                      </p>
+                    </div>
+                  </Card>
+                )}
+              </div>
             )}
           </div>
 

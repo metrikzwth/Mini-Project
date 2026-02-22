@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,6 +32,7 @@ const History = () => {
   const { addCredits } = useWallet();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [, forceUpdate] = useState(0);
+  const [selectedAttachment, setSelectedAttachment] = useState<{ name: string, data: string, type: string } | null>(null);
 
   // Listen for real-time updates (from Doctor portal)
   useEffect(() => {
@@ -56,17 +58,17 @@ const History = () => {
   const hiddenOrderIds = getHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, user?.id || '');
   const orders = getData<Order[]>(STORAGE_KEYS.ORDERS, [])
     .filter(o => o.patientId === user?.id && !hiddenOrderIds.includes(o.id))
-    .sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
+    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
 
   const hiddenRxIds = getHiddenItems(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user?.id || '');
   const prescriptions = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, [])
     .filter(p => p.patientId === user?.id && !hiddenRxIds.includes(p.id))
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
 
   const hiddenAptIds = getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '');
   const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
     .filter(a => a.patientId === user?.id && !hiddenAptIds.includes(a.id))
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
 
   const handleCancelOrder = async (order: Order) => {
     if (!confirm(`Are you sure you want to cancel Order #${order.id.slice(-6)}?`)) return;
@@ -87,12 +89,12 @@ const History = () => {
     setData(STORAGE_KEYS.ORDERS, updatedOrders);
     syncOrderStatusToSupabase(order.id, 'Cancelled');
 
-    // Refund if paid via wallet
-    if (order.paymentMethod === 'wallet') {
-      await addCredits(order.total, `Refund: Order #${order.id.slice(-6)} cancelled`);
-      toast.success(`Order cancelled — $${order.total.toFixed(2)} refunded to wallet`);
-    } else {
-      toast.success('Order cancelled successfully');
+    if (order.paymentMethod === 'wallet' || order.paymentMethod === 'cod') {
+      toast.success(
+        order.paymentMethod === 'wallet'
+          ? 'Order cancelled. Admin will process your refund shortly.'
+          : 'Order cancelled successfully'
+      );
     }
 
     setCancellingId(null);
@@ -314,7 +316,7 @@ const History = () => {
                           <CardTitle className="text-lg">{rx.diagnosis}</CardTitle>
                           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground mt-1">
                             <span className="flex items-center gap-1">
-                              <User className="w-4 h-4" /> Dr. {rx.doctorName.replace(/^Dr\.?\s*/i, '')}
+                              <User className="w-4 h-4" /> Dr. {(rx.doctorName || '').replace(/^Dr\.?\s*/i, '')}
                             </span>
                             <span className="flex items-center gap-1">
                               <Calendar className="w-4 h-4" /> {rx.date}
@@ -361,6 +363,14 @@ const History = () => {
                           <strong>Notes:</strong> {rx.notes}
                         </p>
                       )}
+                      {rx.attachment && (
+                        <div className="mt-4 flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setSelectedAttachment(rx.attachment)}>
+                            <FileText className="w-4 h-4 mr-2" />
+                            View Attachment
+                          </Button>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
@@ -392,7 +402,12 @@ const History = () => {
                             <User className="w-6 h-6 text-primary" />
                           </div>
                           <div>
-                            <h3 className="font-semibold text-foreground">{apt.doctorName}</h3>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-semibold text-foreground">{apt.doctorName}</h3>
+                              <Badge variant="outline" className="text-xs">
+                                {apt.type === 'video' ? '📹 Video' : '🏥 In-Person'}
+                              </Badge>
+                            </div>
                             <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
                               <span className="flex items-center gap-1">
                                 <Calendar className="w-4 h-4" /> {apt.date}
@@ -432,7 +447,33 @@ const History = () => {
         </Tabs>
       </main>
 
-      <MedicineChatbot />
+
+      {/* Attachment Viewer Dialog */}
+      <Dialog open={!!selectedAttachment} onOpenChange={(open) => !open && setSelectedAttachment(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+          <DialogHeader className="p-4 bg-muted/50 border-b shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-primary" />
+              {selectedAttachment?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto bg-black/5 p-4 flex items-center justify-center min-h-[500px]">
+            {selectedAttachment?.type === 'pdf' ? (
+              <iframe
+                src={`${selectedAttachment.data}#toolbar=0`}
+                className="w-full h-full min-h-[500px] border-0 rounded bg-white shadow-sm"
+                title={selectedAttachment.name}
+              />
+            ) : selectedAttachment?.type === 'image' ? (
+              <img
+                src={selectedAttachment.data}
+                alt={selectedAttachment.name}
+                className="max-w-full max-h-[calc(90vh-100px)] object-contain rounded shadow-sm"
+              />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

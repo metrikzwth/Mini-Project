@@ -89,7 +89,7 @@ const Cart = () => {
       })),
       total: totalPrice,
       status: "Pending",
-      orderDate: new Date().toISOString().split("T")[0],
+      orderDate: new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
       deliveryAddress: address,
       paymentMethod: payWithWallet ? "wallet" : "cod",
       transactionId

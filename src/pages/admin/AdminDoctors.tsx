@@ -28,6 +28,7 @@ import { syncDoctorToSupabase } from "@/lib/supabaseSync";
 import { Plus, Pencil, User as UserIcon, Star, Shield, Eye, EyeOff, Lock, Wallet, Minus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useWallet } from "@/contexts/WalletContext";
 
 const CredentialDisplay = ({ user }: { user?: User }) => {
   const [show, setShow] = useState(false);
@@ -63,9 +64,10 @@ const CredentialDisplay = ({ user }: { user?: User }) => {
 
 const AdminDoctors = () => {
   // We'll use local state for now, but in a real app this would sync with Supabase
-  const [doctors, setDoctors] = useState<Doctor[]>(
-    getData(STORAGE_KEYS.DOCTORS, []),
-  );
+  const [doctors, setDoctors] = useState<Doctor[]>(() => {
+    const rawDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
+    return Array.from(new Map(rawDocs.map(d => [d.name.toLowerCase().trim(), d])).values());
+  });
   const [users, setUsers] = useState<User[]>(
     getData(STORAGE_KEYS.USERS, []),
   );
@@ -108,7 +110,7 @@ const AdminDoctors = () => {
         const freshDoctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
         console.log('[AdminDoctors] Reloading users from storage:', freshUsers.length);
         setUsers(freshUsers);
-        setDoctors(freshDoctors);
+        setDoctors(Array.from(new Map(freshDoctors.map(d => [d.name.toLowerCase().trim(), d])).values()));
         fetchBalances();
       }
     };
@@ -118,7 +120,8 @@ const AdminDoctors = () => {
       const freshUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
       const freshDoctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
       setUsers(freshUsers);
-      setDoctors(freshDoctors);
+      setDoctors(Array.from(new Map(freshDoctors.map(d => [d.name.toLowerCase().trim(), d])).values()));
+      fetchBalances();
     };
     window.addEventListener('localDataUpdate', handleLocalUpdate);
 
@@ -138,6 +141,7 @@ const AdminDoctors = () => {
   const [walletAmount, setWalletAmount] = useState("");
   const [walletAction, setWalletAction] = useState<'add' | 'deduct'>('add');
   const [processingWallet, setProcessingWallet] = useState(false);
+  const { addCredits, deductCredits } = useWallet();
 
   // Delete confirmation state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -320,59 +324,28 @@ const AdminDoctors = () => {
 
     setProcessingWallet(true);
     try {
-      // Handle Local User (Mock)
-      if (!isUUID(selectedDoctorForWallet.id)) {
-        const allUsers = getData<any[]>(STORAGE_KEYS.USERS, []);
-        const updatedUsers = allUsers.map(u => {
-          if (u.id === selectedDoctorForWallet.id) {
-            const currentBalance = u.balance || 0;
-            const newBalance = walletAction === 'add'
-              ? currentBalance + amount
-              : Math.max(0, currentBalance - amount);
-            return { ...u, balance: newBalance };
-          }
-          return u;
-        });
-        setData(STORAGE_KEYS.USERS, updatedUsers);
-        setUsers(updatedUsers); // Update local state
-        setWalletBalances(prev => ({
-          ...prev,
-          [selectedDoctorForWallet.id]: updatedUsers.find(u => u.id === selectedDoctorForWallet.id)?.balance || 0
-        }));
-        toast.success("Wallet updated (Local)");
-        setWalletDialogOpen(false);
-        return;
-      }
-
-      // Handle Real DB User
-      const description = `Admin Adjustment: ${walletAction === 'add' ? 'Credit' : 'Debit'}`;
-      const rpcName = walletAction === 'add' ? 'add_credits' : 'deduct_credits';
-      const params: any = {
-        target_user_id: selectedDoctorForWallet.id,
-        txn_description: description
-      };
+      const description = `Admin Adjustment: ${walletAction === 'add' ? 'Credit' : 'Debit'} via Doctor Management`;
+      let success = false;
 
       if (walletAction === 'add') {
-        params.credit_amount = amount;
+        success = await addCredits(amount, description, selectedDoctorForWallet.id, 'manual_adjustment');
       } else {
-        params.deduct_amount = amount;
-        params.txn_type = 'manual_adjustment';
+        success = await deductCredits(amount, description, selectedDoctorForWallet.id, 'manual_adjustment');
       }
 
-      const { error } = await supabase.rpc(rpcName, params);
+      if (success) {
+        toast.success("Wallet updated successfully");
+        setWalletDialogOpen(false);
+        fetchBalances(); // Refresh
 
-      if (error) throw error;
-
-      toast.success("Wallet updated successfully");
-      setWalletDialogOpen(false);
-      fetchBalances(); // Refresh
-
-      // Force broadcast update for other tabs (in case Realtime is slow/broken)
-      dataChannel.postMessage({ type: 'update', key: 'wallet_db_update' });
-
+        // Force broadcast update for other tabs (in case Realtime is slow/broken)
+        dataChannel.postMessage({ type: 'update', key: 'wallet_db_update' });
+      } else {
+        throw new Error("Failed to update wallet balance");
+      }
     } catch (error: any) {
       console.error("Wallet update error:", error);
-      toast.error(`Failed: ${error.message}`);
+      // toast error is handled by WalletContext mostly
     } finally {
       setProcessingWallet(false);
       setWalletAmount("");

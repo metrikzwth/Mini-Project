@@ -46,6 +46,7 @@ const DoctorNavbar = () => {
     { path: '/doctor/appointments', label: 'Appointments', icon: Calendar },
     { path: '/doctor/consultation', label: 'Video Consult', icon: Video },
     { path: '/doctor/prescriptions', label: 'Prescriptions', icon: FileText },
+    { path: '/doctor/history', label: 'History', icon: FileText },
     { path: '/doctor/wallet', label: 'Wallet', icon: Wallet },
   ];
 

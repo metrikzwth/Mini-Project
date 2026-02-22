@@ -23,7 +23,8 @@ import {
   X,
   Stethoscope,
   Wallet,
-  Settings
+  Settings,
+  Video
 } from 'lucide-react';
 import {
   Dialog,
@@ -116,6 +117,7 @@ const PatientNavbar = () => {
     { path: '/patient/dashboard', label: 'Dashboard', icon: Home },
     { path: '/patient/medicines', label: 'Medicines', icon: Pill },
     { path: '/patient/appointments', label: 'Appointments', icon: Calendar },
+    { path: '/patient/consultation', label: 'Video Consult', icon: Video },
     { path: '/patient/history', label: 'History', icon: FileText },
     { path: '/patient/wallet', label: 'Wallet', icon: Wallet },
   ];

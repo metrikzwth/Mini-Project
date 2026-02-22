@@ -206,3 +206,41 @@ export async function deleteAppointmentFromSupabase(apptId: string) {
         console.error('[sync] Appointment delete failed:', err);
     }
 }
+
+// ==================== PRESCRIPTIONS ====================
+
+/** Sync a prescription to Supabase */
+export async function syncPrescriptionToSupabase(rx: import('./data').Prescription) {
+    if (!isUUID(rx.patientId) || !isUUID(rx.doctorId)) {
+        console.log('[sync] Skipping prescription sync — mock IDs');
+        return;
+    }
+
+    try {
+        const { error } = await import('./supabase').then(m => m.supabase).then(supabase => supabase.from('prescriptions').upsert({
+            id: rx.id,
+            patient_id: rx.patientId,
+            doctor_id: rx.doctorId,
+            diagnosis: rx.diagnosis,
+            notes: rx.notes || null,
+            date: rx.date,
+            medicines: rx.medicines // Stored as JSONB
+        }, { onConflict: 'id' }));
+
+        if (error) console.error('[sync] Prescription upsert error:', error);
+        else console.log('[sync] Prescription synced to Supabase:', rx.id);
+    } catch (err) {
+        console.error('[sync] Prescription sync failed:', err);
+    }
+}
+
+/** Delete a prescription from Supabase */
+export async function deletePrescriptionFromSupabase(rxId: string) {
+    try {
+        const { error } = await import('./supabase').then(m => m.supabase).then(supabase => supabase.from('prescriptions').delete().eq('id', rxId));
+        if (error) console.error('[sync] Prescription delete error:', error);
+        else console.log('[sync] Prescription deleted from Supabase:', rxId);
+    } catch (err) {
+        console.error('[sync] Prescription delete failed:', err);
+    }
+}

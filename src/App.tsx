@@ -26,6 +26,7 @@ import DoctorDashboard from "./pages/doctor/DoctorDashboard";
 import DoctorAppointments from "./pages/doctor/DoctorAppointments";
 import DoctorConsultation from "./pages/doctor/DoctorConsultation";
 import DoctorPrescriptions from "./pages/doctor/DoctorPrescriptions";
+import DoctorHistory from "./pages/doctor/DoctorHistory";
 import DoctorWallet from "./pages/doctor/Wallet";
 
 // Admin Pages
@@ -100,6 +101,7 @@ const AppRoutes = () => {
       <Route path="/doctor/appointments" element={<DoctorRoute><DoctorAppointments /></DoctorRoute>} />
       <Route path="/doctor/consultation" element={<DoctorRoute><DoctorConsultation /></DoctorRoute>} />
       <Route path="/doctor/prescriptions" element={<DoctorRoute><DoctorPrescriptions /></DoctorRoute>} />
+      <Route path="/doctor/history" element={<DoctorRoute><DoctorHistory /></DoctorRoute>} />
       <Route path="/doctor/wallet" element={<DoctorRoute><DoctorWallet /></DoctorRoute>} />
 
       {/* Admin Routes */}

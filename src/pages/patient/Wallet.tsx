@@ -201,7 +201,11 @@ const PatientWallet = () => {
                                                 {txn.type.replace(/_/g, ' ')}
                                             </span>
                                         </TableCell>
-                                        <TableCell>{txn.description}</TableCell>
+                                        <TableCell>
+                                            {txn.description === 'Refund' || txn.description === 'Refund: Item Out of Stock / Damaged'
+                                                ? 'Refunded for known issues'
+                                                : txn.description.replace('Refund: Item Out of Stock / Damaged', 'Refunded for known issues')}
+                                        </TableCell>
                                         <TableCell className={`text-right font-medium ${txn.amount > 0 ? "text-green-600" : "text-red-600"
                                             }`}>
                                             {txn.amount > 0 ? "+" : "-"}{Math.abs(txn.amount).toFixed(2)}

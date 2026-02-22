@@ -7,8 +7,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { Wallet, Search, Edit2, Settings, Save, ArrowLeft } from 'lucide-react';
+import { Search, Edit2, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
+import { getData, STORAGE_KEYS, User } from '@/lib/data';
+import { useWallet } from '@/contexts/WalletContext';
 
 interface UserWallet {
     id: string;
@@ -26,20 +28,21 @@ const WalletManagement = () => {
     const [wallets, setWallets] = useState<UserWallet[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [roleFilter, setRoleFilter] = useState<'patient' | 'doctor'>('patient');
 
-    // Conversion Rate State
-    const [conversionRate, setConversionRate] = useState<string>('1.0');
-    const [loadingRate, setLoadingRate] = useState(false);
+    const { addCredits } = useWallet();
+
+
 
     // Dialog State
     const [selectedWallet, setSelectedWallet] = useState<UserWallet | null>(null);
     const [adjustmentAmount, setAdjustmentAmount] = useState('');
-    const [adjustmentType, setAdjustmentType] = useState<'add' | 'remove'>('add');
+    const [adjustmentReason, setAdjustmentReason] = useState('');
+    const [adjustmentType, setAdjustmentType] = useState<'refund'>('refund');
     const [processing, setProcessing] = useState(false);
 
     useEffect(() => {
         fetchWallets();
-        fetchConversionRate();
     }, []);
 
     const fetchWallets = async () => {
@@ -48,40 +51,46 @@ const WalletManagement = () => {
             .from('wallets')
             .select('*, profiles(full_name, email, role)');
 
-        if (error) {
-            console.error('Error fetching wallets:', error);
-            toast.error('Failed to load wallets');
+        let finalWallets: UserWallet[] = [];
+
+        const localUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
+        const localMapped: UserWallet[] = localUsers.map((u: any) => ({
+            id: u.id,
+            balance: u.balance || 0,
+            user_id: u.id,
+            profiles: {
+                full_name: u.name,
+                email: u.email,
+                role: u.role
+            }
+        }));
+
+        if (!error && data && data.length > 0) {
+            finalWallets = [...(data as any)];
+            // Add local users that are not in the DB
+            const dbIds = new Set(finalWallets.map(w => w.user_id));
+            localMapped.forEach(lw => {
+                if (!dbIds.has(lw.user_id)) finalWallets.push(lw);
+            });
         } else {
-            setWallets(data as any);
+            console.log('Falling back to local storage USERS');
+            finalWallets = localMapped;
         }
+
+        // Deduplicate by full name first, then email
+        const uniqueWalletsMap = new Map();
+        finalWallets.forEach(w => {
+            const key = (w.profiles?.full_name || w.profiles?.email || w.user_id).toLowerCase().trim();
+            if (!uniqueWalletsMap.has(key)) {
+                uniqueWalletsMap.set(key, w);
+            }
+        });
+
+        setWallets(Array.from(uniqueWalletsMap.values()));
         setLoading(false);
     };
 
-    const fetchConversionRate = async () => {
-        const { data, error } = await supabase
-            .from('system_settings')
-            .select('value')
-            .eq('key', 'credit_conversion_rate')
-            .single();
 
-        if (data) {
-            setConversionRate(data.value);
-        }
-    };
-
-    const updateConversionRate = async () => {
-        setLoadingRate(true);
-        const { error } = await supabase
-            .from('system_settings')
-            .upsert({ key: 'credit_conversion_rate', value: conversionRate });
-
-        if (error) {
-            toast.error('Failed to update rate');
-        } else {
-            toast.success('Conversion rate updated');
-        }
-        setLoadingRate(false);
-    };
 
     const handleAdjustment = async () => {
         if (!selectedWallet || !adjustmentAmount) return;
@@ -95,38 +104,32 @@ const WalletManagement = () => {
             return;
         }
 
-        const description = `Admin Adjustment: ${adjustmentType === 'add' ? 'Credit' : 'Debit'}`;
-        const rpcName = adjustmentType === 'add' ? 'add_credits' : 'deduct_credits';
+        const isDoctor = (selectedWallet.profiles?.role || (selectedWallet as any).role) === 'doctor';
+        const defaultReason = isDoctor ? 'Manual Wallet Adjustment via Admin' : 'Refunded for known issues';
+        const description = adjustmentReason.trim() ? adjustmentReason.trim() : defaultReason;
+        const txnType = isDoctor ? 'manual_adjustment' : 'refund';
 
-        const params: any = {
-            target_user_id: selectedWallet.user_id, // RPC expects target_user_id
-            txn_description: description
-        };
+        const success = await addCredits(amount, description, selectedWallet.user_id, txnType);
 
-        if (adjustmentType === 'add') {
-            params.credit_amount = amount;
+        if (!success) {
+            toast.error('Refund failed');
         } else {
-            params.deduct_amount = amount;
-            params.txn_type = 'manual_adjustment';
-        }
-
-        const { error } = await supabase.rpc(rpcName, params);
-
-        if (error) {
-            toast.error(error.message);
-        } else {
-            toast.success('Balance updated successfully');
+            toast.success('Refund processed successfully');
             setSelectedWallet(null);
             setAdjustmentAmount('');
+            setAdjustmentReason('');
             fetchWallets();
         }
         setProcessing(false);
     };
 
-    const filteredWallets = wallets.filter(w =>
-        w.profiles?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        w.profiles?.email?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredWallets = wallets.filter(w => {
+        const name = (w.profiles?.full_name || (w as any).name || '').toLowerCase();
+        const email = (w.profiles?.email || (w as any).email || '').toLowerCase();
+        const role = ((w.profiles?.role || (w as any).role) || '').toLowerCase();
+        const search = searchTerm.toLowerCase();
+        return role === roleFilter && (name.includes(search) || email.includes(search));
+    });
 
     return (
         <div className="min-h-screen bg-background flex">
@@ -137,41 +140,12 @@ const WalletManagement = () => {
                         <Button variant="outline" size="icon" onClick={() => navigate(-1)}>
                             <ArrowLeft className="h-4 w-4" />
                         </Button>
-                        <h1 className="text-3xl font-bold">Wallet Management</h1>
+                        <h1 className="text-3xl font-bold">Refund Management</h1>
                     </div>
                 </div>
 
                 <div className="grid gap-6 mb-6">
-                    {/* System Settings Card */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <Settings className="w-5 h-5" /> System Settings
-                            </CardTitle>
-                            <CardDescription>Manage global wallet configurations</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="flex items-end gap-4 max-w-sm">
-                                <div className="space-y-2 flex-1">
-                                    <label className="text-sm font-medium">Credit Conversion Rate</label>
-                                    <div className="relative">
-                                        <div className="absolute left-3 top-2.5 text-muted-foreground text-sm">1 Credit = </div>
-                                        <Input
-                                            value={conversionRate}
-                                            onChange={(e) => setConversionRate(e.target.value)}
-                                            className="pl-20"
-                                            placeholder="1.0"
-                                        />
-                                        <div className="absolute right-3 top-2.5 text-muted-foreground text-sm">Currency</div>
-                                    </div>
-                                </div>
-                                <Button onClick={updateConversionRate} disabled={loadingRate}>
-                                    <Save className="w-4 h-4 mr-2" />
-                                    {loadingRate ? 'Saving...' : 'Save Rate'}
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
+
 
                     {/* User Balances Card */}
                     <Card>
@@ -179,14 +153,34 @@ const WalletManagement = () => {
                             <CardTitle>User Balances</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div className="flex items-center gap-4 mb-4">
-                                <Search className="text-muted-foreground w-4 h-4" />
-                                <Input
-                                    placeholder="Search by name or email..."
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="max-w-sm"
-                                />
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+                                <div className="flex p-1 bg-muted rounded-lg">
+                                    <Button
+                                        variant={roleFilter === 'patient' ? 'default' : 'ghost'}
+                                        size="sm"
+                                        onClick={() => setRoleFilter('patient')}
+                                        className="w-24"
+                                    >
+                                        Patients
+                                    </Button>
+                                    <Button
+                                        variant={roleFilter === 'doctor' ? 'default' : 'ghost'}
+                                        size="sm"
+                                        onClick={() => setRoleFilter('doctor')}
+                                        className="w-24"
+                                    >
+                                        Doctors
+                                    </Button>
+                                </div>
+                                <div className="flex items-center gap-4 w-full sm:w-auto">
+                                    <Search className="text-muted-foreground w-4 h-4 hidden sm:block" />
+                                    <Input
+                                        placeholder="Search by name or email..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="max-w-sm w-full"
+                                    />
+                                </div>
                             </div>
 
                             <div className="rounded-md border">
@@ -216,11 +210,11 @@ const WalletManagement = () => {
                                                         <div className="text-sm text-muted-foreground">{wallet.profiles?.email}</div>
                                                     </TableCell>
                                                     <TableCell className="capitalize">
-                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${wallet.profiles?.role === 'doctor'
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${(wallet.profiles?.role || (wallet as any).role) === 'doctor'
                                                             ? "bg-blue-100 text-blue-800"
                                                             : "bg-gray-100 text-gray-800"
                                                             }`}>
-                                                            {wallet.profiles?.role}
+                                                            {wallet.profiles?.role || (wallet as any).role}
                                                         </span>
                                                     </TableCell>
                                                     <TableCell className="text-right font-mono font-medium">{wallet.balance.toFixed(2)}</TableCell>
@@ -228,36 +222,22 @@ const WalletManagement = () => {
                                                         <Dialog>
                                                             <DialogTrigger asChild>
                                                                 <Button variant="outline" size="sm" onClick={() => setSelectedWallet(wallet)}>
-                                                                    <Edit2 className="w-4 h-4 mr-2" /> Adjust
+                                                                    <Edit2 className="w-4 h-4 mr-2" />
+                                                                    {(wallet.profiles?.role || (wallet as any).role) === 'doctor' ? 'Adjustment' : 'Refund'}
                                                                 </Button>
                                                             </DialogTrigger>
                                                             <DialogContent>
                                                                 <DialogHeader>
-                                                                    <DialogTitle>Adjust Balance</DialogTitle>
+                                                                    <DialogTitle>
+                                                                        {(wallet.profiles?.role || (wallet as any).role) === 'doctor'
+                                                                            ? 'Manual Wallet Adjustment'
+                                                                            : 'Issue Refund to User'}
+                                                                    </DialogTitle>
                                                                 </DialogHeader>
                                                                 <div className="py-4 space-y-4">
                                                                     <div className="p-3 bg-muted rounded-lg">
-                                                                        <p className="text-sm font-medium">User: {wallet.profiles?.full_name}</p>
+                                                                        <p className="text-sm font-medium">User: {wallet.profiles?.full_name || (wallet as any).name}</p>
                                                                         <p className="text-sm text-muted-foreground">Current Balance: {wallet.balance.toFixed(2)}</p>
-                                                                    </div>
-
-                                                                    <div className="flex gap-4">
-                                                                        <Button
-                                                                            type="button"
-                                                                            variant={adjustmentType === 'add' ? 'default' : 'outline'}
-                                                                            onClick={() => setAdjustmentType('add')}
-                                                                            className="flex-1"
-                                                                        >
-                                                                            Add Credit
-                                                                        </Button>
-                                                                        <Button
-                                                                            type="button"
-                                                                            variant={adjustmentType === 'remove' ? 'destructive' : 'outline'}
-                                                                            onClick={() => setAdjustmentType('remove')}
-                                                                            className="flex-1"
-                                                                        >
-                                                                            Remove Credit
-                                                                        </Button>
                                                                     </div>
 
                                                                     <div className="space-y-2">
@@ -269,10 +249,20 @@ const WalletManagement = () => {
                                                                             onChange={(e) => setAdjustmentAmount(e.target.value)}
                                                                         />
                                                                     </div>
+
+                                                                    <div className="space-y-2">
+                                                                        <label className="text-sm font-medium">Reason (Optional)</label>
+                                                                        <Input
+                                                                            type="text"
+                                                                            placeholder={((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? "e.g. Bonus" : "e.g. Refund for missing item"}
+                                                                            value={adjustmentReason}
+                                                                            onChange={(e) => setAdjustmentReason(e.target.value)}
+                                                                        />
+                                                                    </div>
                                                                 </div>
                                                                 <DialogFooter>
                                                                     <Button onClick={handleAdjustment} disabled={processing} className="w-full">
-                                                                        {processing ? 'Processing...' : 'Confirm Adjustment'}
+                                                                        {processing ? 'Processing...' : ((wallet.profiles?.role || (wallet as any).role) === 'doctor' ? 'Confirm Adjustment' : 'Confirm Refund')}
                                                                     </Button>
                                                                 </DialogFooter>
                                                             </DialogContent>

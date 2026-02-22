@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import Peer from 'peerjs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Video, Mic, MicOff, VideoOff, Phone, Loader2, User } from 'lucide-react';
+import { Video, Mic, MicOff, VideoOff, Phone, Loader2, User, Paperclip, X, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { getData, setData, STORAGE_KEYS, Appointment } from '@/lib/data';
@@ -21,11 +21,15 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
     const [isCallActive, setIsCallActive] = useState(false);
     const [myPeerId, setMyPeerId] = useState('');
 
+    // Shared Document State
+    const [sharedFile, setSharedFile] = useState<{ url: string, type: string, name: string } | null>(null);
+
     const myVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
     const peerRef = useRef<Peer | null>(null);
     const callRef = useRef<any>(null);
     const streamRef = useRef<MediaStream | null>(null);
+    const dataConnRef = useRef<any>(null);
     const retryRef = useRef<NodeJS.Timeout | null>(null);
     const mountedRef = useRef(true);
     const connectedRef = useRef(false);
@@ -33,8 +37,8 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
 
     // Deterministic IDs
     const sanitize = (str: string) => str.replace(/[^a-zA-Z0-9-_]/g, '_');
-    const myId = sanitize(role === 'doctor' ? `doc-${appointmentId}` : `pat-${appointmentId}`);
-    const targetId = sanitize(role === 'doctor' ? `pat-${appointmentId}` : `doc-${appointmentId}`);
+    const myId = sanitize(role === 'doctor' ? `doc - ${appointmentId} ` : `pat - ${appointmentId} `);
+    const targetId = sanitize(role === 'doctor' ? `pat - ${appointmentId} ` : `doc - ${appointmentId} `);
 
     // Handle incoming remote stream — shared by both caller and answerer
     const onRemoteStream = useCallback((remoteMediaStream: MediaStream) => {
@@ -95,7 +99,7 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
 
                 peer.on('open', (id) => {
                     if (!mountedRef.current) return;
-                    console.log(`[VideoCall] Peer open: ${id}`);
+                    console.log(`[VideoCall] Peer open: ${id} `);
                     setMyPeerId(id);
                     setStatus('Connecting to other party...');
 
@@ -127,6 +131,32 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                         }
                         tryCall();
                     }, 3000);
+
+                    // Setup Data Connection for File Sharing
+                    const conn = peer.connect(targetId);
+                    dataConnRef.current = conn;
+                    conn.on('data', (data: any) => {
+                        if (data.type === 'share-file') {
+                            console.log('[VideoCall] Received shared file:', data.file.name);
+                            toast.success(`Participant shared a document.`);
+                            setSharedFile(data.file);
+                        }
+                    });
+                    conn.on('error', (err) => console.error('[VideoCall] DataConnection error:', err));
+                });
+
+                // Answer incoming data connections
+                peer.on('connection', (conn) => {
+                    console.log('[VideoCall] Incoming data connection...');
+                    dataConnRef.current = conn;
+                    conn.on('data', (data: any) => {
+                        if (data.type === 'share-file') {
+                            console.log('[VideoCall] Received shared file:', data.file.name);
+                            toast.success(`Participant shared a document.`);
+                            setSharedFile(data.file);
+                        }
+                    });
+                    conn.on('error', (err) => console.error('[VideoCall] DataConnection error:', err));
                 });
 
                 // Answer incoming calls
@@ -145,10 +175,15 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                     if (err.type === 'peer-unavailable') {
                         setStatus('Waiting for other party to join...');
                     } else if (err.type === 'unavailable-id') {
-                        setStatus('ID conflict — close other tabs');
-                        toast.error('Close other tabs using this appointment');
+                        setStatus('Reconnecting (waiting for previous session to close)...');
+                        if (peerRef.current) {
+                            try { peerRef.current.destroy(); } catch { }
+                        }
+                        setTimeout(() => {
+                            if (mountedRef.current && !connectedRef.current) init();
+                        }, 3000);
                     } else {
-                        setStatus(`Error: ${err.type}`);
+                        setStatus(`Error: ${err.type} `);
                     }
                 });
 
@@ -190,25 +225,43 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
         };
     }, [appointmentId, role, myId, targetId, onRemoteStream]);
 
-    // Listen for call-end broadcast from the other party
-    useEffect(() => {
-        const channel = new BroadcastChannel(`videocall-${appointmentId}`);
-        channel.onmessage = (event) => {
-            if (event.data?.type === 'call-ended' && event.data?.endedBy !== role) {
-                console.log('[VideoCall] Other party ended the call');
-                toast.info('The other party has ended the consultation.');
-                // Clean up without re-broadcasting
-                if (retryRef.current) clearInterval(retryRef.current);
-                if (callRef.current) try { callRef.current.close(); } catch { }
-                if (peerRef.current) try { peerRef.current.destroy(); } catch { }
-                if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-                setIsCallActive(false);
-                setRemoteStream(null);
-                onEndCall();
+    // File Upload Handler
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (file.size > 5 * 1024 * 1024) {
+            toast.error("File is too large. Max 5MB allowed.");
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const base64Data = reader.result as string;
+            const sharedData = {
+                url: base64Data,
+                type: file.type.includes('pdf') ? 'pdf' : 'image',
+                name: file.name
+            };
+
+            // Set locally
+            setSharedFile(sharedData);
+
+            // Broadcast to remote peer via DataConnection
+            if (dataConnRef.current && dataConnRef.current.open) {
+                try {
+                    dataConnRef.current.send({ type: 'share-file', file: sharedData });
+                    toast.success(`Shared ${file.name} `);
+                } catch (err) {
+                    console.error('[VideoCall] Failed to send file via PeerJS:', err);
+                    toast.error("Failed to share file");
+                }
+            } else {
+                toast.error("Not connected to peer yet");
             }
         };
-        return () => channel.close();
-    }, [appointmentId, role, onEndCall]);
+        reader.readAsDataURL(file);
+    };
 
     const toggleMute = () => {
         if (streamRef.current) {
@@ -228,87 +281,110 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
         if (endedRef.current) return;
         endedRef.current = true;
 
-        // Broadcast to other tab that call has ended
-        try {
-            const channel = new BroadcastChannel(`videocall-${appointmentId}`);
-            channel.postMessage({ type: 'call-ended', endedBy: role });
-            channel.close();
-        } catch { }
+        if (role === 'doctor') {
+            // Doctors end the session for everyone
+            try {
+                const channel = new BroadcastChannel(`videocall - ${appointmentId} `);
+                channel.postMessage({ type: 'call-ended', endedBy: role });
+                channel.close();
+            } catch { }
+        } else {
+            // Patient just dropping off silently (they can theoretically rejoin if Doctor is still there)
+            console.log('[VideoCall] Patient disconnected locally.');
+        }
 
-        // Mark appointment as completed so it can't be called again
-        try {
-            const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-            const updated = appointments.map(a =>
-                a.id === appointmentId ? { ...a, status: 'completed' as const } : a
-            );
-            setData(STORAGE_KEYS.APPOINTMENTS, updated);
-        } catch { }
-
-        // Clean up WebRTC
+        // Clean up WebRTC locally
         if (retryRef.current) clearInterval(retryRef.current);
         if (callRef.current) try { callRef.current.close(); } catch { }
         if (peerRef.current) try { peerRef.current.destroy(); } catch { }
         if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
         setIsCallActive(false);
         setRemoteStream(null);
+        setSharedFile(null);
         onEndCall();
     };
 
+    useEffect(() => {
+        const channel = new BroadcastChannel(`videocall - ${appointmentId} `);
+        channel.onmessage = (event) => {
+            if (event.data.type === 'call-ended' && role === 'patient') {
+                toast.info('The consultation was concluded by the doctor.');
+                endCall();
+            }
+        };
+        return () => channel.close();
+    }, [appointmentId, role]);
+
     return (
-        <Card className="border-2 overflow-hidden h-full flex flex-col">
-            <div className="relative flex-1 bg-black min-h-[400px]">
-                {/* Remote Video (Main View) */}
-                {remoteStream ? (
+        <Card className="border-2 overflow-hidden h-full flex flex-col relative">
+            <div className={cn("flex-1 min-h-0 bg-black flex", sharedFile ? "flex-row" : "flex-col")}>
+                {/* Main Video Section */}
+                <div className={cn("relative flex-1 min-w-0 flex items-center justify-center transition-all bg-black", sharedFile ? "w-1/2 border-r border-white/10" : "w-full")}>
+                    {/* Remote Video (Main View) */}
                     <video
                         ref={remoteVideoRef}
                         autoPlay
                         playsInline
-                        className="w-full h-full object-cover"
+                        className={cn("w-full h-full object-cover", !remoteStream && "hidden")}
                     />
-                ) : (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-white/70 space-y-4">
-                        <div className="w-20 h-20 bg-white/10 rounded-full flex items-center justify-center animate-pulse">
-                            <User className="w-10 h-10" />
+
+                    {!remoteStream && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-white/50 space-y-4">
+                            <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center animate-pulse">
+                                <User className="w-10 h-10" />
+                            </div>
+                            <p className="text-sm font-medium">Waiting for participant...</p>
                         </div>
-                        <p className="text-lg font-medium">{status}</p>
-                        {!isCallActive && (
-                            <div className="flex items-center gap-2 text-white/50">
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                <span className="text-sm">Auto-connecting...</span>
+                    )}
+
+                    {/* Local Video (Picture-in-Picture) */}
+                    <div className={cn(
+                        "absolute bg-gray-900 rounded-lg border-2 border-white/20 overflow-hidden shadow-lg z-10",
+                        sharedFile ? "bottom-2 right-2 w-24 h-16" : "bottom-4 right-4 w-40 h-28"
+                    )}>
+                        <video
+                            ref={myVideoRef}
+                            autoPlay
+                            muted
+                            playsInline
+                            className={cn("w-full h-full object-cover", isVideoOff && "hidden")}
+                        />
+                        {isVideoOff && (
+                            <div className="w-full h-full flex items-center justify-center bg-black">
+                                <VideoOff className="w-6 h-6 text-white/50" />
                             </div>
                         )}
-                        {/* Debug info */}
-                        <div className="mt-4 p-3 bg-black/60 rounded-lg text-xs font-mono text-left space-y-1">
-                            <p>📋 Appointment: <span className="text-blue-400">{appointmentId}</span></p>
-                            <p>🆔 My ID: <span className="text-green-400">{myPeerId || myId}</span></p>
-                            <p>🎯 Target: <span className="text-yellow-400">{targetId}</span></p>
-                            <p>📡 Status: <span className="text-purple-400">{status}</span></p>
+                        <div className="absolute bottom-1 left-2 text-[10px] text-white/80 bg-black/50 px-1 rounded">
+                            You
+                        </div>
+                    </div>
+                </div>
+
+                {/* Shared Document Side Panel */}
+                {sharedFile && (
+                    <div className="w-1/2 h-full bg-zinc-900 flex flex-col relative overflow-hidden">
+                        <div className="flex justify-between items-center bg-zinc-800 p-2 sm:p-3 text-white border-b border-white/10 shrink-0">
+                            <div className="flex items-center gap-2 truncate pr-2">
+                                <span className="text-xs px-1.5 py-0.5 bg-blue-500/20 text-blue-300 rounded uppercase font-semibold tracking-wide shrink-0">{sharedFile.type}</span>
+                                <span className="font-medium text-sm truncate">{sharedFile.name}</span>
+                            </div>
+                            <Button variant="ghost" size="icon" className="hover:bg-white/10 h-7 w-7 text-white shrink-0" onClick={() => setSharedFile(null)}>
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
+                        <div className="flex-1 w-full bg-black/50 p-2 overflow-hidden flex items-center justify-center relative">
+                            {sharedFile.type === 'pdf' ? (
+                                <iframe src={`${sharedFile.url} #toolbar = 0 & navpanes=0`} className="w-full h-full bg-white rounded shadow-inner" title="PDF Document" />
+                            ) : (
+                                <img src={sharedFile.url} alt="Shared Document" className="max-w-full max-h-full object-contain rounded" />
+                            )}
                         </div>
                     </div>
                 )}
-
-                {/* Local Video (Picture-in-Picture) */}
-                <div className="absolute bottom-4 right-4 w-40 h-28 bg-gray-900 rounded-lg border-2 border-white/20 overflow-hidden shadow-lg z-10">
-                    <video
-                        ref={myVideoRef}
-                        autoPlay
-                        muted
-                        playsInline
-                        className={cn("w-full h-full object-cover", isVideoOff && "hidden")}
-                    />
-                    {isVideoOff && (
-                        <div className="w-full h-full flex items-center justify-center">
-                            <VideoOff className="w-8 h-8 text-white/50" />
-                        </div>
-                    )}
-                    <div className="absolute bottom-1 left-2 text-[10px] text-white/80 bg-black/50 px-1 rounded">
-                        You ({role})
-                    </div>
-                </div>
             </div>
 
             {/* Controls */}
-            <CardContent className="p-4 bg-background border-t">
+            <div className="p-4 bg-background border-t shrink-0 relative flex-none z-50">
                 <div className="flex justify-center gap-4">
                     <Button
                         variant={isMuted ? "destructive" : "outline"}
@@ -324,8 +400,9 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                         size="icon"
                         className="rounded-full h-12 w-12"
                         onClick={endCall}
+                        title={role === 'doctor' ? "End Call completely" : "Leave Call"}
                     >
-                        <Phone className="h-5 w-5 rotate-[135deg]" />
+                        {role === 'doctor' ? <Phone className="h-5 w-5 rotate-[135deg]" /> : <LogOut className="h-5 w-5 ml-1" />}
                     </Button>
 
                     <Button
@@ -336,8 +413,31 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                     >
                         {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
                     </Button>
+
+                    {/* File Upload Button (Patient Only) */}
+                    {role === 'patient' && (
+                        <div className="relative">
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                className="rounded-full h-12 w-12 hover:bg-muted"
+                                title="Share Document (PDF/Image)"
+                            >
+                                <label htmlFor={`upload - ${myId} `} className="cursor-pointer flex items-center justify-center w-full h-full">
+                                    <Paperclip className="h-5 w-5" />
+                                </label>
+                            </Button>
+                            <input
+                                type="file"
+                                id={`upload - ${myId} `}
+                                accept="application/pdf,image/*"
+                                className="hidden"
+                                onChange={handleFileUpload}
+                            />
+                        </div>
+                    )}
                 </div>
-            </CardContent>
+            </div>
         </Card>
     );
 };
