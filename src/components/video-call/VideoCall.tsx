@@ -35,14 +35,14 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
     const connectedRef = useRef(false);
     const endedRef = useRef(false); // prevent double-end
 
-    // Deterministic IDs
+    // Deterministic base IDs (just for channel names now)
     const sanitize = (str: string) => str.replace(/[^a-zA-Z0-9-_]/g, '_');
-    const myId = sanitize(role === 'doctor' ? `doc - ${appointmentId} ` : `pat - ${appointmentId} `);
-    const targetId = sanitize(role === 'doctor' ? `pat - ${appointmentId} ` : `doc - ${appointmentId} `);
+    const roomChannelId = sanitize(`webrtc-room-${appointmentId}`);
 
     // Handle incoming remote stream — shared by both caller and answerer
     const onRemoteStream = useCallback((remoteMediaStream: MediaStream) => {
         if (!mountedRef.current || connectedRef.current) return;
+
         console.log('[VideoCall] ✅ Got remote stream!');
         connectedRef.current = true;
         setRemoteStream(remoteMediaStream);
@@ -55,13 +55,19 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
             retryRef.current = null;
         }
 
-        // Attach to video element (also handled by ref callback, but belt-and-suspenders)
-        setTimeout(() => {
-            if (remoteVideoRef.current) {
-                remoteVideoRef.current.srcObject = remoteMediaStream;
-            }
-        }, 100);
+        // Also trigger DOM update
+        if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = remoteMediaStream;
+        }
     }, []);
+
+    // Strict DOM Binding for Remote Stream
+    useEffect(() => {
+        if (remoteVideoRef.current && remoteStream) {
+            console.log('[VideoCall] Strictly binding stream to DOM video node');
+            remoteVideoRef.current.srcObject = remoteStream;
+        }
+    }, [remoteStream]);
 
     useEffect(() => {
         mountedRef.current = true;
@@ -84,8 +90,67 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                     myVideoRef.current.srcObject = mediaStream;
                 }
 
-                // 2. Create Peer
-                const peer = new Peer(myId, {
+                const tryCall = (callTargetId: string) => {
+                    if (!mountedRef.current || connectedRef.current || !peerRef.current?.open) return;
+                    console.log(`[VideoCall] Calling ${callTargetId}...`);
+                    try {
+                        const call = peer.call(callTargetId, mediaStream);
+                        if (call) {
+                            call.on('stream', onRemoteStream);
+                            call.on('close', handleRemoteLeave);
+                            call.on('error', (e: any) => console.error('[VideoCall] Outbound call error:', e));
+                            callRef.current = call;
+                        }
+
+                        // Also attempt data connection
+                        const conn = peer.connect(callTargetId);
+                        dataConnRef.current = conn;
+                        conn.on('data', (data: any) => {
+                            if (data.type === 'share-file') {
+                                console.log('[VideoCall] Received shared file:', data.file.name);
+                                toast.success(`Participant shared a document.`);
+                                setSharedFile(data.file);
+                            }
+                        });
+                        conn.on('close', handleRemoteLeave);
+                        conn.on('error', (err) => console.error('[VideoCall] DataConnection error:', err));
+
+                    } catch (e) {
+                        console.error('[VideoCall] Call attempt error:', e);
+                    }
+                };
+
+                const handleRemoteLeave = () => {
+                    if (!mountedRef.current) return;
+                    console.log('[VideoCall] Remote party disconnected. Awaiting reconnect...');
+                    connectedRef.current = false;
+                    setRemoteStream(null);
+                    setIsCallActive(false);
+                    setStatus('Participant disconnected. Waiting for reconnection...');
+
+                    if (remoteVideoRef.current) {
+                        remoteVideoRef.current.srcObject = null;
+                    }
+
+                    // Stop any existing call loops
+                    if (retryRef.current) {
+                        clearInterval(retryRef.current);
+                        retryRef.current = null;
+                    }
+                    if (callRef.current) {
+                        try { callRef.current.close(); } catch { }
+                        callRef.current = null;
+                    }
+                    if (dataConnRef.current) {
+                        try { dataConnRef.current.close(); } catch { }
+                        dataConnRef.current = null;
+                    }
+
+                    // Leave peer active, just wait for a new call or new broadcast
+                };
+
+                // 2. Create Peer - using dynamic ID to avoid deadlocks on hard refresh
+                const peer = new Peer(undefined, {
                     config: {
                         iceServers: [
                             { urls: 'stun:stun.l.google.com:19302' },
@@ -99,50 +164,37 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
 
                 peer.on('open', (id) => {
                     if (!mountedRef.current) return;
-                    console.log(`[VideoCall] Peer open: ${id} `);
+                    console.log(`[VideoCall] Peer open with dynamic ID: ${id}`);
                     setMyPeerId(id);
-                    setStatus('Connecting to other party...');
+                    setStatus('Waiting for other party...');
 
-                    // Auto-call the target
-                    const tryCall = () => {
-                        if (!mountedRef.current || connectedRef.current || !peerRef.current?.open) return;
-                        console.log(`[VideoCall] Calling ${targetId}...`);
-                        try {
-                            const call = peer.call(targetId, mediaStream);
-                            if (call) {
-                                call.on('stream', onRemoteStream);
-                                call.on('close', () => console.log('[VideoCall] Outbound call closed'));
-                                call.on('error', (e: any) => console.error('[VideoCall] Outbound call error:', e));
-                                callRef.current = call;
-                            }
-                        } catch (e) {
-                            console.error('[VideoCall] Call attempt error:', e);
-                        }
-                    };
+                    // Announce our dynamic ID to the room
+                    const channel = new BroadcastChannel(roomChannelId);
 
-                    // First attempt immediately
-                    tryCall();
-
-                    // Retry every 3 seconds
+                    // Announce ourselves every 2 seconds until connected
                     retryRef.current = setInterval(() => {
                         if (connectedRef.current) {
                             if (retryRef.current) clearInterval(retryRef.current);
                             return;
                         }
-                        tryCall();
-                    }, 3000);
+                        console.log(`[VideoCall] Announcing presence to ${roomChannelId}...`);
+                        channel.postMessage({ type: 'presence', role, peerId: id });
+                    }, 2000);
 
-                    // Setup Data Connection for File Sharing
-                    const conn = peer.connect(targetId);
-                    dataConnRef.current = conn;
-                    conn.on('data', (data: any) => {
-                        if (data.type === 'share-file') {
-                            console.log('[VideoCall] Received shared file:', data.file.name);
-                            toast.success(`Participant shared a document.`);
-                            setSharedFile(data.file);
+                    // Listen for the other party's ID
+                    channel.onmessage = (event) => {
+                        if (event.data.type === 'presence' && event.data.role !== role) {
+                            console.log(`[VideoCall] Detected ${event.data.role} with ID: ${event.data.peerId}`);
+
+                            // If we aren't connected yet, try to call them!
+                            if (!connectedRef.current) {
+                                // Add a small random jitter to avoid perfect collisions where both call each other simultaneously
+                                setTimeout(() => {
+                                    if (!connectedRef.current) tryCall(event.data.peerId);
+                                }, Math.random() * 500);
+                            }
                         }
-                    });
-                    conn.on('error', (err) => console.error('[VideoCall] DataConnection error:', err));
+                    };
                 });
 
                 // Answer incoming data connections
@@ -156,16 +208,27 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                             setSharedFile(data.file);
                         }
                     });
+                    conn.on('close', handleRemoteLeave);
                     conn.on('error', (err) => console.error('[VideoCall] DataConnection error:', err));
                 });
 
                 // Answer incoming calls
                 peer.on('call', (incomingCall) => {
                     if (!mountedRef.current) return;
-                    console.log('[VideoCall] Answering incoming call...');
+                    console.log(`[VideoCall] Answering incoming call from: ${incomingCall.peer}`);
+
+                    // Accept the call with our local stream
                     incomingCall.answer(mediaStream);
-                    incomingCall.on('stream', onRemoteStream);
-                    incomingCall.on('close', () => console.log('[VideoCall] Incoming call closed'));
+
+                    // Listen for their stream
+                    incomingCall.on('stream', (stream) => {
+                        console.log('[VideoCall] Received stream from incoming call!');
+                        onRemoteStream(stream);
+                    });
+
+                    incomingCall.on('close', handleRemoteLeave);
+                    incomingCall.on('error', (err) => console.error('[VideoCall] Incoming call error:', err));
+
                     callRef.current = incomingCall;
                 });
 
@@ -189,10 +252,12 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
 
                 peer.on('disconnected', () => {
                     if (mountedRef.current && peerRef.current && !peerRef.current.destroyed) {
-                        console.log('[VideoCall] Reconnecting peer...');
+                        console.log('[VideoCall] Reconnecting peer to signaling server...');
                         peerRef.current.reconnect();
                     }
                 });
+
+                peer.on('close', handleRemoteLeave);
 
             } catch (err) {
                 console.error('[VideoCall] Init error:', err);
@@ -207,23 +272,29 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
 
         return () => {
             mountedRef.current = false;
+            // Clean up intervals
             if (retryRef.current) {
                 clearInterval(retryRef.current);
                 retryRef.current = null;
             }
+            // Clean up WebRTC
             if (callRef.current) {
                 try { callRef.current.close(); } catch { }
+            }
+            if (dataConnRef.current) {
+                try { dataConnRef.current.close(); } catch { }
             }
             if (peerRef.current) {
                 try { peerRef.current.destroy(); } catch { }
                 peerRef.current = null;
             }
+            // Clean up MediaStream
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(t => t.stop());
                 streamRef.current = null;
             }
         };
-    }, [appointmentId, role, myId, targetId, onRemoteStream]);
+    }, [appointmentId, role, roomChannelId, onRemoteStream]);
 
     // File Upload Handler
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -423,13 +494,13 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                                 className="rounded-full h-12 w-12 hover:bg-muted"
                                 title="Share Document (PDF/Image)"
                             >
-                                <label htmlFor={`upload - ${myId} `} className="cursor-pointer flex items-center justify-center w-full h-full">
+                                <label htmlFor={`upload - ${myPeerId || 'offline'} `} className="cursor-pointer flex items-center justify-center w-full h-full">
                                     <Paperclip className="h-5 w-5" />
                                 </label>
                             </Button>
                             <input
                                 type="file"
-                                id={`upload - ${myId} `}
+                                id={`upload - ${myPeerId || 'offline'} `}
                                 accept="application/pdf,image/*"
                                 className="hidden"
                                 onChange={handleFileUpload}
