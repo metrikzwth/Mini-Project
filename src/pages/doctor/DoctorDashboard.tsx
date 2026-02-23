@@ -4,7 +4,7 @@ import { useWallet } from '@/contexts/WalletContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import DoctorNavbar from '@/components/layout/DoctorNavbar';
-import { getData, STORAGE_KEYS, Appointment, Doctor, User } from '@/lib/data';
+import { getData, STORAGE_KEYS, Appointment, Doctor, User, getHiddenItems } from '@/lib/data';
 import { Calendar, Video, FileText, Users, Clock, Wallet } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
@@ -19,8 +19,9 @@ const DoctorDashboard = () => {
   const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
   const currentDoctor = doctors.find(d => d.id === user?.id);
 
+  const hiddenAptIds = getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '');
   const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
-    .filter(a => a.doctorName === user?.name);
+    .filter(a => a.doctorName === user?.name && !hiddenAptIds.includes(a.id));
   const users = getData<User[]>(STORAGE_KEYS.USERS, []);
 
   const todayAppointments = appointments

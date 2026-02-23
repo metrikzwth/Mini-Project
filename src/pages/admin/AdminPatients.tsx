@@ -157,7 +157,12 @@ const AdminPatients = () => {
     };
 
     const handleDelete = async (userId: string) => {
-        if (!confirm("Are you sure you want to terminate this patient's account? This action is permanent and they will not be able to log in with this email again.")) return;
+        if (isUUID(userId)) {
+            toast.error("Supabase-stored patients can only be deleted directly from the Supabase dashboard.");
+            return;
+        }
+
+        if (!confirm("Are you sure you want to permanently delete this user, including their entire account history (appointments, orders, and prescriptions)? This action cannot be undone.")) return;
 
         // Block email permanently
         const patientObj = patients.find(p => p.id === userId);
@@ -173,6 +178,20 @@ const AdminPatients = () => {
         const updatedUsers = allUsers.filter(u => u.id !== userId);
         setData(STORAGE_KEYS.USERS, updatedUsers);
 
+        // Delete all associated local data
+        const appointments = getData<any[]>(STORAGE_KEYS.APPOINTMENTS, []);
+        setData(STORAGE_KEYS.APPOINTMENTS, appointments.filter(a => a.patientId !== userId));
+
+        const orders = getData<any[]>(STORAGE_KEYS.ORDERS, []);
+        setData(STORAGE_KEYS.ORDERS, orders.filter(o => o.patientId !== userId));
+
+        const prescriptions = getData<any[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
+        setData(STORAGE_KEYS.PRESCRIPTIONS, prescriptions.filter(p => p.patientId !== userId));
+
+        // Delete associated mock transactions
+        const transactions = getData<any[]>((STORAGE_KEYS as any).TRANSACTIONS || 'medicare_transactions', []);
+        setData((STORAGE_KEYS as any).TRANSACTIONS || 'medicare_transactions', transactions.filter(t => t.userId !== userId));
+
         // Delete from DB if valid UUID
         if (isUUID(userId)) {
             try {
@@ -182,7 +201,7 @@ const AdminPatients = () => {
             }
         }
 
-        toast.success("Patient account permanently terminated");
+        toast.success("Patient account and history permanently terminated");
         loadPatients();
     };
 

@@ -7,6 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
 import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
@@ -39,7 +43,7 @@ const Appointments = () => {
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
   const [isBooking, setIsBooking] = useState(false);
   const [bookingData, setBookingData] = useState({
-    date: '',
+    date: undefined as Date | undefined,
     time: '',
     type: 'video' as 'video' | 'in-person'
   });
@@ -87,7 +91,7 @@ const Appointments = () => {
       patientName: user?.name || '',
       doctorId: selectedDoctor.id,
       doctorName: selectedDoctor.name,
-      date: bookingData.date,
+      date: format(bookingData.date, 'yyyy-MM-dd'),
       time: bookingData.time,
       status: 'pending',
       type: bookingData.type,
@@ -106,13 +110,13 @@ const Appointments = () => {
       .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0))
     );
     setSelectedDoctor(null);
-    setBookingData({ date: '', time: '', type: 'video' });
+    setBookingData({ date: undefined, time: '', type: 'video' });
     setPayWithWallet(false);
     setIsBooking(false);
     toast.success('Appointment booked successfully!');
   };
 
-  const timeSlots = ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00'];
+  const timeSlots = ['10:00 AM', '11:00 AM', '12:00 PM', '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM', '06:00 PM', '07:00 PM'];
 
   return (
     <div className="min-h-screen bg-background">
@@ -257,12 +261,40 @@ const Appointments = () => {
 
               <div className="space-y-2">
                 <Label>Select Date</Label>
-                <Input
-                  type="date"
-                  min={new Date().toISOString().split('T')[0]}
-                  value={bookingData.date}
-                  onChange={(e) => setBookingData({ ...bookingData, date: e.target.value })}
-                />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant={"outline"}
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !bookingData.date && "text-muted-foreground"
+                      )}
+                    >
+                      <Calendar className="mr-2 h-4 w-4" />
+                      {bookingData.date ? format(bookingData.date, "PPP") : <span>Pick a date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="single"
+                      selected={bookingData.date}
+                      onSelect={(d) => setBookingData({ ...bookingData, date: d })}
+                      disabled={(date) => {
+                        // Disable past dates
+                        if (date < new Date(new Date().setHours(0, 0, 0, 0))) return true;
+
+                        // Disable days doctor is not available
+                        if (!selectedDoctor) return false;
+
+                        const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+                        const dayName = daysOfWeek[date.getDay()];
+
+                        return !selectedDoctor.availability.includes(dayName);
+                      }}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div className="space-y-2">

@@ -13,6 +13,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -155,6 +156,8 @@ const AdminDoctors = () => {
     experience: "",
     fee: "",
     image: "",
+    rating: 4.5,
+    availability: ["Monday", "Wednesday", "Friday"],
   });
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -214,8 +217,8 @@ const AdminDoctors = () => {
       specialization: form.specialization,
       experience: parseInt(form.experience) || 0,
       fee: parseFloat(form.fee) || 0,
-      rating: editing?.rating || 4.5,
-      availability: editing?.availability || ["Monday", "Wednesday", "Friday"],
+      rating: form.rating,
+      availability: form.availability,
       image: form.image || "/placeholder.svg",
       isActive: true,
     };
@@ -378,6 +381,8 @@ const AdminDoctors = () => {
                 experience: "",
                 fee: "",
                 image: "",
+                rating: 4.5,
+                availability: ["Monday", "Wednesday", "Friday"],
               });
               setEditing(null);
               setIsOpen(true);
@@ -436,6 +441,8 @@ const AdminDoctors = () => {
                             experience: d.experience.toString(),
                             fee: d.fee.toString(),
                             image: d.image || "",
+                            rating: d.rating || 4.5,
+                            availability: d.availability || ["Monday", "Wednesday", "Friday"],
                           });
                           setIsOpen(true);
                         }}
@@ -562,6 +569,48 @@ const AdminDoctors = () => {
                     value={form.fee}
                     onChange={(e) => setForm({ ...form, fee: e.target.value })}
                   />
+                </div>
+              </div>
+
+              <div>
+                <Label>Rating</Label>
+                <div className="flex items-center gap-2 mt-1 mb-2">
+                  <Star className="w-4 h-4 text-warning fill-warning" />
+                  <Input
+                    type="number"
+                    min="0"
+                    max="5"
+                    step="0.1"
+                    value={form.rating}
+                    onChange={(e) => setForm({ ...form, rating: parseFloat(e.target.value) || 0 })}
+                    className="w-24"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 border-t">
+                <Label className="mb-2 block">Working Days (Availability)</Label>
+                <div className="flex flex-wrap gap-2">
+                  {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day) => {
+                    const isSelected = form.availability.includes(day);
+                    return (
+                      <Badge
+                        key={day}
+                        variant={isSelected ? "default" : "outline"}
+                        className="cursor-pointer hover:bg-primary/80"
+                        onClick={() => {
+                          setForm((prev) => ({
+                            ...prev,
+                            availability: isSelected
+                              ? prev.availability.filter((d) => d !== day)
+                              : [...prev.availability, day],
+                          }));
+                        }}
+                      >
+                        {day}
+                      </Badge>
+                    );
+                  })}
                 </div>
               </div>
             </div>

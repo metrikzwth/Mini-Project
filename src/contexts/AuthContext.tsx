@@ -106,6 +106,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const login = async (email: string, password: string) => {
+    const banned = getData<string[]>('BANNED_EMAILS', []);
+    if (banned.includes(email)) {
+      return { success: false, message: 'This account has been terminated. You cannot log in with this email.' };
+    }
+
     // 1. Try Mock Login first (since Supabase is broken/unreachable for this demo)
     const users = getData<User[]>(STORAGE_KEYS.USERS, []);
     const mockUser = users.find(u => u.email === email && u.password === password);
@@ -131,6 +136,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const register = async (email: string, password: string, name: string, role: 'patient' | 'doctor') => {
+    const banned = getData<string[]>('BANNED_EMAILS', []);
+    if (banned.includes(email)) {
+      return { success: false, message: 'This email is blocked from registration. Please use a different email.' };
+    }
+
     // Mock Registration Fallback (Optional, but good for completeness)
 
     const { data, error } = await supabase.auth.signUp({

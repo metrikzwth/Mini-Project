@@ -38,6 +38,7 @@ const WalletManagement = () => {
     const [selectedWallet, setSelectedWallet] = useState<UserWallet | null>(null);
     const [adjustmentAmount, setAdjustmentAmount] = useState('');
     const [adjustmentReason, setAdjustmentReason] = useState('');
+    const [adjustmentReasonType, setAdjustmentReasonType] = useState('preset1');
     const [adjustmentType, setAdjustmentType] = useState<'refund'>('refund');
     const [processing, setProcessing] = useState(false);
 
@@ -105,11 +106,19 @@ const WalletManagement = () => {
         }
 
         const isDoctor = (selectedWallet.profiles?.role || (selectedWallet as any).role) === 'doctor';
-        const defaultReason = isDoctor ? 'Manual Wallet Adjustment via Admin' : 'Refunded for known issues';
-        const description = adjustmentReason.trim() ? adjustmentReason.trim() : defaultReason;
+
+        let finalDescription = '';
+        if (adjustmentReasonType === 'preset1') {
+            finalDescription = isDoctor ? 'Manual Wallet Adjustment via Admin' : 'Refund: Item Out of Stock / Damaged';
+        } else if (adjustmentReasonType === 'preset2') {
+            finalDescription = isDoctor ? 'Bonus / Incentive' : 'Refund: Consultation Cancelled';
+        } else {
+            finalDescription = adjustmentReason.trim() ? adjustmentReason.trim() : (isDoctor ? 'Manual Wallet Adjustment via Admin' : 'Refunded for known issues');
+        }
+
         const txnType = isDoctor ? 'manual_adjustment' : 'refund';
 
-        const success = await addCredits(amount, description, selectedWallet.user_id, txnType);
+        const success = await addCredits(amount, finalDescription, selectedWallet.user_id, txnType);
 
         if (!success) {
             toast.error('Refund failed');
@@ -118,6 +127,7 @@ const WalletManagement = () => {
             setSelectedWallet(null);
             setAdjustmentAmount('');
             setAdjustmentReason('');
+            setAdjustmentReasonType('preset1');
             fetchWallets();
         }
         setProcessing(false);
@@ -221,7 +231,11 @@ const WalletManagement = () => {
                                                     <TableCell className="text-right">
                                                         <Dialog>
                                                             <DialogTrigger asChild>
-                                                                <Button variant="outline" size="sm" onClick={() => setSelectedWallet(wallet)}>
+                                                                <Button variant="outline" size="sm" onClick={() => {
+                                                                    setSelectedWallet(wallet);
+                                                                    setAdjustmentReason('');
+                                                                    setAdjustmentReasonType('preset1');
+                                                                }}>
                                                                     <Edit2 className="w-4 h-4 mr-2" />
                                                                     {(wallet.profiles?.role || (wallet as any).role) === 'doctor' ? 'Adjustment' : 'Refund'}
                                                                 </Button>
@@ -250,15 +264,34 @@ const WalletManagement = () => {
                                                                         />
                                                                     </div>
 
-                                                                    <div className="space-y-2">
-                                                                        <label className="text-sm font-medium">Reason (Optional)</label>
-                                                                        <Input
-                                                                            type="text"
-                                                                            placeholder={((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? "e.g. Bonus" : "e.g. Refund for missing item"}
-                                                                            value={adjustmentReason}
-                                                                            onChange={(e) => setAdjustmentReason(e.target.value)}
-                                                                        />
+                                                                    <div className="space-y-3">
+                                                                        <label className="text-sm font-medium">Reason</label>
+                                                                        <div className="space-y-2">
+                                                                            <label className="flex items-center space-x-2">
+                                                                                <input type="radio" name="reasonType" value="preset1" checked={adjustmentReasonType === 'preset1'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
+                                                                                <span className="text-sm">{((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? 'Manual Wallet Adjustment via Admin' : 'Refund: Item Out of Stock / Damaged'}</span>
+                                                                            </label>
+                                                                            <label className="flex items-center space-x-2">
+                                                                                <input type="radio" name="reasonType" value="preset2" checked={adjustmentReasonType === 'preset2'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
+                                                                                <span className="text-sm">{((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? 'Bonus / Incentive' : 'Refund: Consultation Cancelled'}</span>
+                                                                            </label>
+                                                                            <label className="flex items-center space-x-2">
+                                                                                <input type="radio" name="reasonType" value="custom" checked={adjustmentReasonType === 'custom'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
+                                                                                <span className="text-sm">Other (Specify manually)</span>
+                                                                            </label>
+                                                                        </div>
                                                                     </div>
+
+                                                                    {adjustmentReasonType === 'custom' && (
+                                                                        <div className="space-y-2 pt-2 border-t mt-2">
+                                                                            <Input
+                                                                                type="text"
+                                                                                placeholder="Type custom reason..."
+                                                                                value={adjustmentReason}
+                                                                                onChange={(e) => setAdjustmentReason(e.target.value)}
+                                                                            />
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                                 <DialogFooter>
                                                                     <Button onClick={handleAdjustment} disabled={processing} className="w-full">

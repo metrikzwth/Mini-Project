@@ -411,8 +411,10 @@ export const initializeData = () => {
     // Merge: Add initialUsers if they don't exist in storage
     let updatedUsers = [...existingUsers];
     let hasChanges = false;
+    const banned = getData<string[]>('BANNED_EMAILS', []);
+
     initialUsers.forEach(initUser => {
-      if (!updatedUsers.some(u => u.email === initUser.email)) {
+      if (!updatedUsers.some(u => u.email === initUser.email) && !banned.includes(initUser.email)) {
         updatedUsers.push(initUser);
         hasChanges = true;
       }
