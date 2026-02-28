@@ -17,7 +17,7 @@ import MedicineChatbot from "@/components/chatbot/MedicineChatbot";
 import { useCart } from "@/contexts/CartContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useWallet } from "@/contexts/WalletContext";
-import { getData, setData, STORAGE_KEYS, Order } from "@/lib/data";
+import { getData, setData, STORAGE_KEYS, Order, Medicine } from "@/lib/data";
 import { syncOrderToSupabase } from "@/lib/supabaseSync";
 import {
   ShoppingCart,
@@ -57,6 +57,17 @@ const Cart = () => {
     }
 
     setIsCheckingOut(true);
+
+    // Validate stock before proceeding
+    const currentMedicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
+    for (const item of items) {
+      const med = currentMedicines.find(m => m.id === item.medicine.id);
+      if (!med || med.stock < item.quantity) {
+        toast.error(`Sorry, ${item.medicine.name} is out of stock or requested quantity exceeds available stock.`);
+        setIsCheckingOut(false);
+        return;
+      }
+    }
 
     // Simulate processing
     await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -98,6 +109,20 @@ const Cart = () => {
     const orders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
     orders.push(newOrder);
     setData(STORAGE_KEYS.ORDERS, orders);
+
+    // Update Medicine Stock
+    const medicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
+    let stockUpdated = false;
+    items.forEach(item => {
+      const medIndex = medicines.findIndex(m => m.id === item.medicine.id);
+      if (medIndex !== -1) {
+        medicines[medIndex].stock = Math.max(0, medicines[medIndex].stock - item.quantity);
+        stockUpdated = true;
+      }
+    });
+    if (stockUpdated) {
+      setData(STORAGE_KEYS.MEDICINES, medicines);
+    }
 
     // Dual-write: sync to Supabase
     syncOrderToSupabase(newOrder);
@@ -232,9 +257,14 @@ const Cart = () => {
                           variant="outline"
                           size="icon"
                           className="h-8 w-8"
-                          onClick={() =>
-                            updateQuantity(item.medicine.id, item.quantity + 1)
-                          }
+                          onClick={() => {
+                            if (item.quantity < item.medicine.stock) {
+                              updateQuantity(item.medicine.id, item.quantity + 1);
+                            } else {
+                              toast.error(`Cannot select more than available stock (${item.medicine.stock})`);
+                            }
+                          }}
+                          disabled={item.quantity >= item.medicine.stock}
                         >
                           <Plus className="w-4 h-4" />
                         </Button>

@@ -33,7 +33,9 @@ import {
   XCircle,
   CheckCircle,
 } from "lucide-react";
+import { UserAvatar } from "@/components/ui/UserAvatar";
 import { cn } from "@/lib/utils";
+import { User as UserType } from "@/lib/data";
 
 type TimePeriod = "daily" | "weekly" | "monthly";
 
@@ -94,6 +96,7 @@ function groupOrders(orders: Order[], period: TimePeriod) {
         cancelled: isCancelled ? total : 0,
         orders: 1,
         cancelledCount: isCancelled ? 1 : 0,
+        activeOrders: isCancelled ? 0 : 1,
         items: order.items?.reduce((s, it) => s + it.quantity, 0) || 0,
         cumulativeRevenue: cumRevenue,
       };
@@ -104,7 +107,7 @@ function groupOrders(orders: Order[], period: TimePeriod) {
   let cumRevenue = 0;
   return entries.map((entry) => {
     cumRevenue += entry.revenue;
-    return { ...entry, cumulativeRevenue: cumRevenue };
+    return { ...entry, activeOrders: entry.orders - entry.cancelledCount, cumulativeRevenue: cumRevenue };
   });
 }
 
@@ -131,17 +134,20 @@ function CustomTooltip({ active, payload, label }: any) {
   return (
     <div className="bg-card border rounded-xl shadow-lg p-3 text-sm">
       <p className="font-semibold mb-1.5">{label}</p>
-      {payload.map((entry: any, i: number) => (
-        <p key={i} className="flex items-center gap-2" style={{ color: entry.color }}>
-          <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: entry.color }} />
-          {entry.name}:{" "}
-          <span className="font-medium">
-            {entry.name.toLowerCase().includes("revenue") || entry.name.toLowerCase().includes("income") || entry.name.toLowerCase().includes("cancelled")
-              ? `$${entry.value.toFixed(2)}`
-              : entry.value}
-          </span>
-        </p>
-      ))}
+      {payload.map((entry: any, i: number) => {
+        const isMonetary = entry.name.toLowerCase().includes("revenue") || entry.name.toLowerCase().includes("income");
+        return (
+          <p key={i} className="flex items-center gap-2" style={{ color: entry.color }}>
+            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: entry.color }} />
+            {entry.name}:{" "}
+            <span className="font-medium">
+              {isMonetary
+                ? `$${entry.value.toFixed(2)}`
+                : entry.value}
+            </span>
+          </p>
+        );
+      })}
     </div>
   );
 }
@@ -152,6 +158,7 @@ const AdminDashboard = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [users, setUsers] = useState<UserType[]>([]);
 
   const [revenuePeriod, setRevenuePeriod] = useState<TimePeriod>("daily");
   const [orderPeriod, setOrderPeriod] = useState<TimePeriod>("daily");
@@ -162,6 +169,7 @@ const AdminDashboard = () => {
     setMedicines(getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []));
     const rawDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
     setDoctors(Array.from(new Map(rawDocs.map(d => [d.name.toLowerCase().trim(), d])).values()));
+    setUsers(getData<UserType[]>(STORAGE_KEYS.USERS, []));
   };
 
   useEffect(() => {
@@ -181,6 +189,16 @@ const AdminDashboard = () => {
   // ===== Computed =====
   const activeOrders = useMemo(() => orders.filter((o) => o.status !== "Cancelled"), [orders]);
   const cancelledOrders = useMemo(() => orders.filter((o) => o.status === "Cancelled"), [orders]);
+
+  const pendingAppointments = useMemo(() => appointments.filter(a => a.status !== "completed"), [appointments]);
+
+  const todaysOrders = useMemo(() => {
+    const todayStr = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return orders.filter((o) => {
+      const d = new Date(o.orderDate);
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) === todayStr;
+    });
+  }, [orders]);
 
   const totalRevenue = useMemo(
     () => activeOrders.reduce((sum, o) => sum + (o.total || 0), 0),
@@ -209,7 +227,7 @@ const AdminDashboard = () => {
   const stats = [
     { label: "Medicines", value: medicines.length, icon: Pill, color: "bg-blue-500" },
     { label: "Doctors", value: doctors.filter((d) => d.isActive).length, icon: UserCog, color: "bg-purple-500" },
-    { label: "Appointments", value: appointments.length, icon: Calendar, color: "bg-orange-500" },
+    { label: "Pending Appointments", value: pendingAppointments.length, icon: Calendar, color: "bg-orange-500" },
   ];
 
   const periodLabels: Record<TimePeriod, string> = {
@@ -364,8 +382,8 @@ const AdminDashboard = () => {
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip content={<CustomTooltip />} />
                     <Legend />
-                    <Bar dataKey="revenue" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={28} name="Active Revenue" />
-                    <Bar dataKey="cancelled" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={28} name="Cancelled" opacity={0.75} />
+                    <Bar dataKey="activeOrders" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={28} name="Active Orders" />
+                    <Bar dataKey="cancelledCount" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={28} name="Cancelled Orders" opacity={0.75} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -382,8 +400,8 @@ const AdminDashboard = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {orders.length > 0 ? (
-                orders
+              {todaysOrders.length > 0 ? (
+                todaysOrders
                   .slice(-5)
                   .reverse()
                   .map((o) => {
@@ -393,18 +411,25 @@ const AdminDashboard = () => {
                       ", " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
                     return (
                       <div key={o.id} className="flex justify-between py-3 border-b last:border-0 items-center">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-foreground font-medium">{o.patientName}</span>
-                            {isCancelled && (
-                              <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">
-                                CANCELLED
-                              </span>
-                            )}
+                        <div className="flex items-center gap-3">
+                          <UserAvatar
+                            name={o.patientName}
+                            image={users.find(u => u.id === o.patientId || u.name === o.patientName)?.image}
+                            className="h-9 w-9 hidden sm:block"
+                          />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-foreground font-medium">{o.patientName}</span>
+                              {isCancelled && (
+                                <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">
+                                  CANCELLED
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {timeStr} · {o.items?.reduce((s, i) => s + i.quantity, 0) || 0} items
+                            </p>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {timeStr} · {o.items?.reduce((s, i) => s + i.quantity, 0) || 0} items
-                          </p>
                         </div>
                         <span className={`font-semibold ${isCancelled ? "text-red-500" : "text-green-600"}`}>
                           {isCancelled ? "−" : "+"}${o.total.toFixed(2)}
@@ -424,14 +449,28 @@ const AdminDashboard = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {appointments.length > 0 ? (
-                appointments
+              {pendingAppointments.length > 0 ? (
+                pendingAppointments
                   .slice(-5)
                   .reverse()
                   .map((a) => (
-                    <div key={a.id} className="flex justify-between py-3 border-b last:border-0">
-                      <span className="text-foreground">{a.patientName}</span>
-                      <span className="text-muted-foreground">{a.doctorName}</span>
+                    <div key={a.id} className="flex justify-between py-3 border-b last:border-0 items-center">
+                      <div className="flex items-center gap-3">
+                        <UserAvatar
+                          name={a.patientName}
+                          image={users.find(u => u.name === a.patientName && u.role === 'patient')?.image}
+                          className="h-8 w-8"
+                        />
+                        <span className="text-foreground text-sm font-medium">{a.patientName}</span>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 max-w-[50%]">
+                        <span className="text-muted-foreground text-sm truncate">{a.doctorName}</span>
+                        <UserAvatar
+                          name={a.doctorName}
+                          image={doctors.find(d => d.name === a.doctorName)?.image}
+                          className="h-8 w-8 hidden sm:flex"
+                        />
+                      </div>
                     </div>
                   ))
               ) : (

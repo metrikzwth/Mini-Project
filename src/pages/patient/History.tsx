@@ -6,12 +6,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
-import { getData, setData, STORAGE_KEYS, Order, Prescription, Appointment, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
+import { getData, setData, STORAGE_KEYS, Order, Prescription, Appointment, Doctor, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
 import { syncOrderStatusToSupabase, deleteOrderFromSupabase, deleteAppointmentFromSupabase } from '@/lib/supabaseSync';
+import { UserAvatar } from '@/components/ui/UserAvatar';
 import {
   Package,
   FileText,
@@ -31,11 +42,14 @@ const History = () => {
   const { user } = useAuth();
   const { addCredits } = useWallet();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelOrderConfirm, setCancelOrderConfirm] = useState<Order | null>(null);
   const [, forceUpdate] = useState(0);
   const [selectedAttachment, setSelectedAttachment] = useState<{ name: string, data: string, type: string } | null>(null);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
 
   // Listen for real-time updates (from Doctor portal)
   useEffect(() => {
+    setDoctors(getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []));
     // 1. Local storage event (same tab/window)
     const handleUpdate = () => forceUpdate(n => n + 1);
     window.addEventListener('localDataUpdate', handleUpdate);
@@ -70,10 +84,11 @@ const History = () => {
     .filter(a => a.patientId === user?.id && !hiddenAptIds.includes(a.id))
     .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
 
-  const handleCancelOrder = async (order: Order) => {
-    if (!confirm(`Are you sure you want to cancel Order #${order.id.slice(-6)}?`)) return;
-
+  const confirmCancelOrder = async () => {
+    if (!cancelOrderConfirm) return;
+    const order = cancelOrderConfirm;
     setCancellingId(order.id);
+    setCancelOrderConfirm(null);
 
     // Simulate processing
     await new Promise(resolve => setTimeout(resolve, 800));
@@ -227,7 +242,7 @@ const History = () => {
                               variant="destructive"
                               size="sm"
                               disabled={cancellingId === order.id}
-                              onClick={() => handleCancelOrder(order)}
+                              onClick={() => setCancelOrderConfirm(order)}
                               className="h-7 px-2 text-xs"
                             >
                               {cancellingId === order.id ? (
@@ -398,9 +413,11 @@ const History = () => {
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
-                            <User className="w-6 h-6 text-primary" />
-                          </div>
+                          <UserAvatar
+                            name={apt.doctorName}
+                            image={doctors.find(d => d.name === apt.doctorName)?.image}
+                            className="w-12 h-12"
+                          />
                           <div>
                             <div className="flex items-center gap-2">
                               <h3 className="font-semibold text-foreground">{apt.doctorName}</h3>
@@ -474,6 +491,27 @@ const History = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Cancel Order Confirmation Dialog */}
+      <AlertDialog open={!!cancelOrderConfirm} onOpenChange={(open) => !open && setCancelOrderConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel Order</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to cancel this order?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setCancelOrderConfirm(null)}>Keep Order</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmCancelOrder}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Confirm Cancel
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

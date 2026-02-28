@@ -25,6 +25,7 @@ import { getData, setData, STORAGE_KEYS, User, dataChannel } from "@/lib/data";
 import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { UserAvatar } from "@/components/ui/UserAvatar";
 import { useWallet } from "@/contexts/WalletContext";
 
 interface PatientWithBalance extends User {
@@ -45,6 +46,10 @@ const AdminPatients = () => {
     const [walletAmount, setWalletAmount] = useState("");
     const [walletAction, setWalletAction] = useState<'add' | 'deduct'>('add');
     const [processingWallet, setProcessingWallet] = useState(false);
+
+    // Image Preview State
+    const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+    const [previewImage, setPreviewImage] = useState<string | null>(null);
 
     const { addCredits, deductCredits } = useWallet();
 
@@ -352,12 +357,23 @@ const AdminPatients = () => {
                                     <TableRow key={patient.id}>
                                         <TableCell>
                                             <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-full bg-secondary/10 flex items-center justify-center overflow-hidden border">
-                                                    {patient.image ? (
-                                                        <img src={patient.image} alt={patient.name} className="w-full h-full object-cover" />
-                                                    ) : (
-                                                        <span className="text-xs font-bold text-secondary">{patient.name.charAt(0)}</span>
-                                                    )}
+                                                <div
+                                                    onClick={() => {
+                                                        if (patient.image) {
+                                                            const formattedPreview = (!patient.image.startsWith('http') && !patient.image.startsWith('data:image'))
+                                                                ? `data:image/jpeg;base64,${patient.image}`
+                                                                : patient.image;
+                                                            setPreviewImage(formattedPreview);
+                                                            setImagePreviewOpen(true);
+                                                        }
+                                                    }}
+                                                    className={patient.image ? "cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0" : "flex-shrink-0"}
+                                                >
+                                                    <UserAvatar
+                                                        name={patient.name}
+                                                        image={patient.image}
+                                                        className="h-10 w-10 border-secondary/20"
+                                                    />
                                                 </div>
                                                 <span className="font-medium">{patient.name}</span>
                                             </div>
@@ -473,6 +489,19 @@ const AdminPatients = () => {
                         <DialogFooter>
                             <Button onClick={saveEdit}>Save Changes</Button>
                         </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Image Preview Dialog */}
+                <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
+                    <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-transparent border-none shadow-none">
+                        {previewImage && (
+                            <img
+                                src={previewImage}
+                                alt="Profile Preview"
+                                className="w-full h-auto object-contain rounded-lg shadow-2xl"
+                            />
+                        )}
                     </DialogContent>
                 </Dialog>
             </main>

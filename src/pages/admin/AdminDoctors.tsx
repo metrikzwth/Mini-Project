@@ -30,6 +30,7 @@ import { Plus, Pencil, User as UserIcon, Star, Shield, Eye, EyeOff, Lock, Wallet
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useWallet } from "@/contexts/WalletContext";
+import { UserAvatar } from "@/components/ui/UserAvatar";
 
 const CredentialDisplay = ({ user }: { user?: User }) => {
   const [show, setShow] = useState(false);
@@ -142,6 +143,10 @@ const AdminDoctors = () => {
   const [walletAction, setWalletAction] = useState<'add' | 'deduct'>('add');
   const [processingWallet, setProcessingWallet] = useState(false);
   const { addCredits, deductCredits } = useWallet();
+
+  // Image Preview State
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // Delete confirmation state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -400,12 +405,23 @@ const AdminDoctors = () => {
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-secondary/10 rounded-full flex items-center justify-center overflow-hidden border">
-                        {d.image && d.image !== '/placeholder.svg' ? (
-                          <img src={d.image} alt={d.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <UserIcon className="w-6 h-6 text-secondary" />
-                        )}
+                      <div
+                        className={d.image && d.image !== '/placeholder.svg' ? "cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0" : "flex-shrink-0"}
+                        onClick={() => {
+                          if (d.image && d.image !== '/placeholder.svg') {
+                            const formattedPreview = (!d.image.startsWith('http') && !d.image.startsWith('data:image'))
+                              ? `data:image/jpeg;base64,${d.image}`
+                              : d.image;
+                            setPreviewImage(formattedPreview);
+                            setImagePreviewOpen(true);
+                          }
+                        }}
+                      >
+                        <UserAvatar
+                          name={d.name}
+                          image={d.image}
+                          className="w-12 h-12"
+                        />
                       </div>
                       <div>
                         <h3 className="font-semibold">{d.name}</h3>
@@ -685,6 +701,19 @@ const AdminDoctors = () => {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Image Preview Dialog */}
+        <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
+          <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-transparent border-none shadow-none">
+            {previewImage && (
+              <img
+                src={previewImage}
+                alt="Profile Preview"
+                className="w-full h-auto object-contain rounded-lg shadow-2xl"
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );

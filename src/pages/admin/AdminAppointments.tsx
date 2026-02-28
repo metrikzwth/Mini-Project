@@ -8,17 +8,24 @@ import { Calendar, User, Clock, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { UserAvatar } from "@/components/ui/UserAvatar";
+import { User as UserType, Doctor } from "@/lib/data";
 
 const AdminAppointments = () => {
   const [appointments, setAppointments] = useState<Appointment[]>(
     () => getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
   );
+  const [users, setUsers] = useState<UserType[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
 
   useEffect(() => {
     const handleUpdate = () => {
       setAppointments(getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []));
+      setUsers(getData<UserType[]>(STORAGE_KEYS.USERS, []));
+      setDoctors(getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []));
     };
+    handleUpdate();
 
     window.addEventListener('localDataUpdate', handleUpdate);
     const channel = new BroadcastChannel('medicare_data_updates');
@@ -67,37 +74,53 @@ const AdminAppointments = () => {
           </Button>
         </div>
         <div className="space-y-4">
-          {sortedAppointments.map((a) => (
-            <Card key={a.id} className="border-2 group">
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
-                    <User className="w-6 h-6 text-primary" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-semibold">
-                        {a.patientName} → {a.doctorName}
-                      </p>
-                      <Badge variant="outline" className="text-xs">
-                        {a.type === 'video' ? '📹 Video' : '🏥 In-Person'}
-                      </Badge>
+          {sortedAppointments.map((a) => {
+            const patientUser = users.find(u => u.name === a.patientName && u.role === 'patient');
+            const doctorObj = doctors.find(d => d.name === a.doctorName);
+            const patientImage = patientUser?.image;
+            const doctorImage = doctorObj?.image;
+
+            return (
+              <Card key={a.id} className="border-2 group">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center -space-x-3">
+                      <UserAvatar
+                        name={a.doctorName}
+                        image={doctorImage}
+                        className="w-12 h-12 border-2 border-background z-10 shrink-0"
+                      />
+                      <UserAvatar
+                        name={a.patientName}
+                        image={patientImage}
+                        className="w-12 h-12 border-2 border-background shrink-0"
+                      />
                     </div>
-                    <p className="text-sm text-muted-foreground flex items-center gap-2">
-                      <Calendar className="w-4 h-4" /> {a.date}{" "}
-                      <Clock className="w-4 h-4" /> {a.time}
-                    </p>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold">
+                          {a.doctorName} <span className="text-muted-foreground mx-1">with</span> {a.patientName}
+                        </p>
+                        <Badge variant="outline" className="text-xs">
+                          {a.type === 'video' ? '📹 Video' : '🏥 In-Person'}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground flex items-center gap-2">
+                        <Calendar className="w-4 h-4" /> {a.date}{" "}
+                        <Clock className="w-4 h-4" /> {a.time}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge>{a.status}</Badge>
-                  <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => handleDelete(a.id, e)}>
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                  <div className="flex items-center gap-2">
+                    <Badge>{a.status}</Badge>
+                    <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => handleDelete(a.id, e)}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
           {appointments.length === 0 && (
             <p className="text-center py-16 text-muted-foreground">
               No appointments yet

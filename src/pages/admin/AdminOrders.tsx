@@ -9,13 +9,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getData, setData, STORAGE_KEYS, Order, hideItemForUser, getHiddenItems } from "@/lib/data";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { getData, setData, STORAGE_KEYS, Order, Medicine, hideItemForUser, getHiddenItems } from "@/lib/data";
 import { syncOrderStatusToSupabase } from "@/lib/supabaseSync";
 import { Package, MapPin, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useWallet } from "@/contexts/WalletContext";
+import { UserAvatar } from "@/components/ui/UserAvatar";
+import { User as UserType } from "@/lib/data";
 
 const AdminOrders = () => {
   const [orders, setOrders] = useState<Order[]>(() => {
@@ -24,6 +36,9 @@ const AdminOrders = () => {
     return all.filter(o => !hidden.includes(o.id))
       .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
   });
+
+  const [users, setUsers] = useState<UserType[]>(getData<UserType[]>(STORAGE_KEYS.USERS, []));
+  const [statusConfirm, setStatusConfirm] = useState<{ id: string, status: Order["status"] } | null>(null);
 
   const { addCredits } = useWallet();
 
@@ -84,15 +99,41 @@ const AdminOrders = () => {
 
     // Handle Refund on Cancellation
     let isRefundedNow = orderToUpdate?.isRefunded || false;
-    if (status === 'Cancelled' && orderToUpdate?.status !== 'Cancelled' && orderToUpdate?.paymentMethod === 'wallet') {
-      if (confirm("This order was paid via Wallet. Do you want to process a refund to the patient now?")) {
-        toast.info("Processing refund...");
-        const refunded = await refundToPatient(orderToUpdate);
-        if (!refunded) {
-          toast.error("Refund failed. Status update cancelled.");
-          return;
+    if (status === 'Cancelled' && orderToUpdate?.status !== 'Cancelled') {
+
+      // 1. Restitute Medicine Stock
+      const medicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
+      let stockUpdated = false;
+      orderToUpdate.items.forEach(item => {
+        const medIndex = medicines.findIndex(m => m.id === item.medicineId);
+        if (medIndex !== -1) {
+          medicines[medIndex].stock += item.quantity;
+          stockUpdated = true;
         }
-        isRefundedNow = true;
+      });
+      if (stockUpdated) {
+        setData(STORAGE_KEYS.MEDICINES, medicines);
+      }
+
+      // 2. Handle Wallet Refund if applicable
+      if (orderToUpdate?.paymentMethod === 'wallet') {
+        if (confirm("This order was paid via Wallet. Do you want to process a refund to the patient now?")) {
+          toast.info("Processing refund...");
+          const refunded = await refundToPatient(orderToUpdate);
+          if (!refunded) {
+            toast.error("Refund failed. Status update cancelled.");
+            // Revert stock since refund failed and status update is cancelled
+            if (stockUpdated) {
+              orderToUpdate.items.forEach(item => {
+                const revertIdx = medicines.findIndex(m => m.id === item.medicineId);
+                if (revertIdx !== -1) medicines[revertIdx].stock -= item.quantity;
+              });
+              setData(STORAGE_KEYS.MEDICINES, medicines);
+            }
+            return;
+          }
+          isRefundedNow = true;
+        }
       }
     }
 
@@ -118,65 +159,74 @@ const AdminOrders = () => {
       <main className={cn("transition-all pt-16 lg:pt-0 lg:pl-64", "p-8")}>
         <h1 className="text-4xl font-bold text-foreground mb-8">Orders</h1>
         <div className="space-y-4">
-          {orders.map((o) => (
-            <Card key={o.id} className="border-2">
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between m-3">
-                  <div>
-                    <h3 className="font-semibold">Order #{o.id.slice(-6)}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {o.patientName} • {o.orderDate}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Select
-                      value={o.status}
-                      onValueChange={(v) =>
-                        updateStatus(o.id, v as Order["status"])
-                      }
-                    >
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-popover">
-                        <SelectItem value="Pending">Pending</SelectItem>
-                        <SelectItem value="Processing">Processing</SelectItem>
-                        <SelectItem value="Shipped">Shipped</SelectItem>
-                        <SelectItem value="Delivered">Delivered</SelectItem>
-                        <SelectItem value="Cancelled">Cancelled</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {o.status === 'Cancelled' && o.paymentMethod === 'wallet' && !o.isRefunded && (
-                      <Button variant="outline" size="sm" onClick={() => handleManualRefund(o)} className="text-green-600 border-green-200 hover:bg-green-50 mr-2">
-                        Issue Refund
+          {orders.map((o) => {
+            const patientUser = users.find(u => u.id === o.patientId || u.name === o.patientName);
+            const patientImage = patientUser?.image;
+
+            return (
+              <Card key={o.id} className="border-2">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between m-3">
+                    <div className="flex items-center gap-3">
+                      <UserAvatar name={o.patientName} image={patientImage} className="w-12 h-12" />
+                      <div>
+                        <h3 className="font-semibold">Order #{o.id.slice(-6)}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {o.patientName} • {o.orderDate}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={o.status}
+                        onValueChange={(v) => {
+                          const newStatus = v as Order["status"];
+                          setStatusConfirm({ id: o.id, status: newStatus });
+                        }}
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-popover">
+                          <SelectItem value="Pending">Pending</SelectItem>
+                          <SelectItem value="Processing">Processing</SelectItem>
+                          <SelectItem value="Shipped">Shipped</SelectItem>
+                          <SelectItem value="Delivered">Delivered</SelectItem>
+                          <SelectItem value="Cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {o.status === 'Cancelled' && o.paymentMethod === 'wallet' && !o.isRefunded && (
+                        <Button variant="outline" size="sm" onClick={() => handleManualRefund(o)} className="text-green-600 border-green-200 hover:bg-green-50 mr-2">
+                          Issue Refund
+                        </Button>
+                      )}
+                      {o.status === 'Cancelled' && o.paymentMethod === 'wallet' && o.isRefunded && (
+                        <Badge variant="outline" className="text-green-600 bg-green-50 mr-2 h-9 flex items-center px-3">
+                          Refunded
+                        </Badge>
+                      )}
+                      <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(o.id)}>
+                        <Trash2 className="w-4 h-4" />
                       </Button>
-                    )}
-                    {o.status === 'Cancelled' && o.paymentMethod === 'wallet' && o.isRefunded && (
-                      <Badge variant="outline" className="text-green-600 bg-green-50 mr-2 h-9 flex items-center px-3">
-                        Refunded
-                      </Badge>
-                    )}
-                    <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(o.id)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    </div>
                   </div>
-                </div>
-                <div className="text-sm text-muted-foreground mb-2">
-                  {o.items
-                    .map((i) => `${i.medicineName} x${i.quantity}`)
-                    .join(", ")}
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground flex items-center gap-1">
-                    <MapPin className="w-4 h-4" /> {o.deliveryAddress}
-                  </span>
-                  <span className="font-bold text-primary">
-                    ${o.total.toFixed(2)}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                  <div className="text-sm text-muted-foreground mb-2">
+                    {o.items
+                      .map((i) => `${i.medicineName} x${i.quantity}`)
+                      .join(", ")}
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground flex items-center gap-1">
+                      <MapPin className="w-4 h-4" /> {o.deliveryAddress}
+                    </span>
+                    <span className="font-bold text-primary">
+                      ${o.total.toFixed(2)}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
           {orders.length === 0 && (
             <p className="text-center py-16 text-muted-foreground">
               No orders yet
@@ -184,6 +234,34 @@ const AdminOrders = () => {
           )}
         </div>
       </main>
+
+      {/* Status Confirmation Dialog */}
+      <AlertDialog open={!!statusConfirm} onOpenChange={(open) => !open && setStatusConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Status Update</AlertDialogTitle>
+            <AlertDialogDescription>
+              {statusConfirm?.status === "Cancelled"
+                ? "Are you sure you want to cancel this order?"
+                : `Are you sure you want to mark this order as ${statusConfirm?.status}?`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setStatusConfirm(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (statusConfirm) {
+                  updateStatus(statusConfirm.id, statusConfirm.status);
+                  setStatusConfirm(null);
+                }
+              }}
+              className={statusConfirm?.status === "Cancelled" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}
+            >
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

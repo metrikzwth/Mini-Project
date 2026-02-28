@@ -165,53 +165,72 @@ const Medicines = () => {
                       ${medicine.price.toFixed(2)}
                     </span>
                     <Badge
-                      variant={medicine.stock > 50 ? "default" : "destructive"}
-                      className="bg-secondary text-secondary-foreground"
+                      variant={medicine.stock === 0 ? "destructive" : medicine.stock >= 10 ? "default" : "secondary"}
+                      className={medicine.stock === 0 ? "" : "bg-secondary text-secondary-foreground"}
                     >
-                      {medicine.stock > 50
-                        ? "In Stock"
-                        : `Only ${medicine.stock} left`}
+                      {medicine.stock === 0
+                        ? "Out of Stock"
+                        : medicine.stock >= 10
+                          ? "In Stock"
+                          : `Only ${medicine.stock} left`}
                     </Badge>
                   </div>
                 </CardContent>
 
-                <CardFooter className="flex flex-col gap-3 border-t pt-4">
-                  {/* Quantity Selector */}
-                  <div className="flex items-center justify-between w-full">
-                    <span className="text-sm text-muted-foreground">
-                      Quantity:
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => updateQuantity(medicine.id, -1)}
-                      >
-                        <Minus className="w-4 h-4" />
-                      </Button>
-                      <span className="w-8 text-center font-medium">
-                        {getQuantity(medicine.id)}
+                {medicine.stock > 0 ? (
+                  <CardFooter className="flex flex-col gap-3 border-t pt-4">
+                    {/* Quantity Selector */}
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-sm text-muted-foreground">
+                        Quantity:
                       </span>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => updateQuantity(medicine.id, 1)}
-                      >
-                        <Plus className="w-4 h-4" />
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => updateQuantity(medicine.id, -1)}
+                          disabled={getQuantity(medicine.id) <= 1}
+                        >
+                          <Minus className="w-4 h-4" />
+                        </Button>
+                        <span className="w-8 text-center font-medium">
+                          {getQuantity(medicine.id)}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            if (getQuantity(medicine.id) < medicine.stock) {
+                              updateQuantity(medicine.id, 1);
+                            } else {
+                              toast.error(`Cannot select more than available stock (${medicine.stock})`);
+                            }
+                          }}
+                          disabled={getQuantity(medicine.id) >= medicine.stock}
+                        >
+                          <Plus className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
 
-                  <Button
-                    className="w-full"
-                    onClick={() => handleAddToCart(medicine)}
-                  >
-                    <ShoppingCart className="w-4 h-4 mr-2" />
-                    {isInCart(medicine.id) ? "Add More" : "Add to Cart"}
-                  </Button>
-                </CardFooter>
+                    <Button
+                      className="w-full"
+                      onClick={() => handleAddToCart(medicine)}
+                    >
+                      <ShoppingCart className="w-4 h-4 mr-2" />
+                      {isInCart(medicine.id) ? "Add More" : "Add to Cart"}
+                    </Button>
+                  </CardFooter>
+                ) : (
+                  <CardFooter className="flex justify-center border-t pt-4 pb-6">
+                    <div className="w-full py-2.5 bg-destructive/10 text-destructive text-center rounded-md font-semibold text-sm flex items-center justify-center gap-2">
+                      <AlertCircle className="w-4 h-4" />
+                      Currently Out of Stock
+                    </div>
+                  </CardFooter>
+                )}
               </Card>
             ))}
           </div>

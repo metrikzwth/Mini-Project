@@ -152,9 +152,6 @@ const Appointments = () => {
           <p className="text-muted-foreground">
             Schedule a consultation with our experienced doctors
           </p>
-          <div className="p-4 bg-muted text-xs font-mono break-words rounded overflow-auto mt-4 max-h-48 border">
-            DEBUG: {JSON.stringify(doctors.map(d => ({ id: d.id, name: d.name, active: d.isActive })))}
-          </div>
         </div>
 
         {/* My Appointments */}

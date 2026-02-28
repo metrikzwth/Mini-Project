@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import DoctorNavbar from '@/components/layout/DoctorNavbar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { UserAvatar } from '@/components/ui/UserAvatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,8 +19,12 @@ const DoctorPrescriptions = () => {
   const mockPatients = getData<User[]>(STORAGE_KEYS.USERS, []).filter(u => u.role === 'patient');
   const docAppointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []).filter(a => a.doctorId === user?.id);
   const allPatientsMap = new Map();
-  mockPatients.forEach(p => allPatientsMap.set(p.id, { id: p.id, name: p.name }));
-  docAppointments.forEach(a => allPatientsMap.set(a.patientId, { id: a.patientId, name: a.patientName }));
+  mockPatients.forEach(p => allPatientsMap.set(p.id, { id: p.id, name: p.name, email: p.email, image: p.image }));
+  docAppointments.forEach(a => {
+    if (!allPatientsMap.has(a.patientId)) {
+      allPatientsMap.set(a.patientId, { id: a.patientId, name: a.patientName, email: 'No email provided', image: undefined });
+    }
+  });
   const patients = Array.from(allPatientsMap.values());
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
 
@@ -119,10 +124,25 @@ const DoctorPrescriptions = () => {
             <CardHeader><CardTitle>Create Prescription</CardTitle></CardHeader>
             <CardContent>
               <form className="space-y-4">
-                <div><Label>Patient</Label>
+                <div>
+                  <Label>Patient</Label>
                   <Select value={form.patientId} onValueChange={v => setForm({ ...form, patientId: v })}>
-                    <SelectTrigger><SelectValue placeholder="Select patient" /></SelectTrigger>
-                    <SelectContent className="bg-popover">{patients.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+                    <SelectTrigger className="h-auto py-2">
+                      <SelectValue placeholder="Select patient" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      {patients.map(p => (
+                        <SelectItem key={p.id} value={p.id} className="py-2">
+                          <div className="flex items-center gap-3">
+                            <UserAvatar name={p.name} image={p.image} className="w-8 h-8 flex-shrink-0" />
+                            <div className="flex flex-col text-left">
+                              <span className="font-semibold text-sm leading-none">{p.name}</span>
+                              <span className="text-xs text-muted-foreground mt-1">{p.email}</span>
+                            </div>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                 </div>
                 <div><Label>Diagnosis</Label><Input value={form.diagnosis} onChange={e => setForm({ ...form, diagnosis: e.target.value })} /></div>

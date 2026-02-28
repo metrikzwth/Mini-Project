@@ -9,8 +9,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Search, Edit2, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
-import { getData, STORAGE_KEYS, User } from '@/lib/data';
+import { getData, STORAGE_KEYS, User, Doctor } from '@/lib/data';
 import { useWallet } from '@/contexts/WalletContext';
+import { UserAvatar } from "@/components/ui/UserAvatar";
 
 interface UserWallet {
     id: string;
@@ -29,6 +30,8 @@ const WalletManagement = () => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState<'patient' | 'doctor'>('patient');
+    const [allUsers, setAllUsers] = useState<User[]>(getData<User[]>(STORAGE_KEYS.USERS, []));
+    const [allDoctors, setAllDoctors] = useState<Doctor[]>(getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []));
 
     const { addCredits } = useWallet();
 
@@ -221,96 +224,115 @@ const WalletManagement = () => {
                                                 <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No users found</TableCell>
                                             </TableRow>
                                         ) : (
-                                            filteredWallets.map((wallet) => (
-                                                <TableRow key={wallet.id}>
-                                                    <TableCell>
-                                                        <div className="font-medium">{wallet.profiles?.full_name || 'N/A'}</div>
-                                                        <div className="text-sm text-muted-foreground">{wallet.profiles?.email}</div>
-                                                    </TableCell>
-                                                    <TableCell className="capitalize">
-                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${(wallet.profiles?.role || (wallet as any).role) === 'doctor'
-                                                            ? "bg-blue-100 text-blue-800"
-                                                            : "bg-gray-100 text-gray-800"
-                                                            }`}>
-                                                            {wallet.profiles?.role || (wallet as any).role}
-                                                        </span>
-                                                    </TableCell>
-                                                    <TableCell className="text-right font-mono font-medium">{wallet.balance.toFixed(2)}</TableCell>
-                                                    <TableCell className="text-right">
-                                                        <Dialog>
-                                                            <DialogTrigger asChild>
-                                                                <Button variant="outline" size="sm" onClick={() => {
-                                                                    setSelectedWallet(wallet);
-                                                                    setAdjustmentReason('');
-                                                                    setAdjustmentReasonType('preset1');
-                                                                }}>
-                                                                    <Edit2 className="w-4 h-4 mr-2" />
-                                                                    {(wallet.profiles?.role || (wallet as any).role) === 'doctor' ? 'Adjustment' : 'Refund'}
-                                                                </Button>
-                                                            </DialogTrigger>
-                                                            <DialogContent>
-                                                                <DialogHeader>
-                                                                    <DialogTitle>
-                                                                        {(wallet.profiles?.role || (wallet as any).role) === 'doctor'
-                                                                            ? 'Manual Wallet Adjustment'
-                                                                            : 'Issue Refund to User'}
-                                                                    </DialogTitle>
-                                                                </DialogHeader>
-                                                                <div className="py-4 space-y-4">
-                                                                    <div className="p-3 bg-muted rounded-lg">
-                                                                        <p className="text-sm font-medium">User: {wallet.profiles?.full_name || (wallet as any).name}</p>
-                                                                        <p className="text-sm text-muted-foreground">Current Balance: {wallet.balance.toFixed(2)}</p>
-                                                                    </div>
+                                            filteredWallets.map((wallet) => {
+                                                const role = wallet.profiles?.role || (wallet as any).role;
+                                                let imageToUse = '';
+                                                let fallbackName = wallet.profiles?.full_name || (wallet as any).name || 'Unknown';
 
-                                                                    <div className="space-y-2">
-                                                                        <label className="text-sm font-medium">Amount</label>
-                                                                        <Input
-                                                                            type="number"
-                                                                            placeholder="0.00"
-                                                                            value={adjustmentAmount}
-                                                                            onChange={(e) => setAdjustmentAmount(e.target.value)}
-                                                                        />
-                                                                    </div>
+                                                if (role === 'doctor') {
+                                                    const doc = allDoctors.find(d => d.id === wallet.user_id || d.name === fallbackName);
+                                                    imageToUse = doc?.image || '';
+                                                } else {
+                                                    const pat = allUsers.find(u => u.id === wallet.user_id || u.name === fallbackName);
+                                                    imageToUse = pat?.image || '';
+                                                }
 
-                                                                    <div className="space-y-3">
-                                                                        <label className="text-sm font-medium">Reason</label>
-                                                                        <div className="space-y-2">
-                                                                            <label className="flex items-center space-x-2">
-                                                                                <input type="radio" name="reasonType" value="preset1" checked={adjustmentReasonType === 'preset1'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
-                                                                                <span className="text-sm">{((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? 'Manual Wallet Adjustment via Admin' : 'Refund: Item Out of Stock / Damaged'}</span>
-                                                                            </label>
-                                                                            <label className="flex items-center space-x-2">
-                                                                                <input type="radio" name="reasonType" value="preset2" checked={adjustmentReasonType === 'preset2'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
-                                                                                <span className="text-sm">{((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? 'Bonus / Incentive' : 'Refund: Consultation Cancelled'}</span>
-                                                                            </label>
-                                                                            <label className="flex items-center space-x-2">
-                                                                                <input type="radio" name="reasonType" value="custom" checked={adjustmentReasonType === 'custom'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
-                                                                                <span className="text-sm">Other (Specify manually)</span>
-                                                                            </label>
+                                                return (
+                                                    <TableRow key={wallet.id}>
+                                                        <TableCell>
+                                                            <div className="flex items-center gap-3">
+                                                                <UserAvatar name={fallbackName} image={imageToUse} className="h-10 w-10 border-secondary/20" />
+                                                                <div>
+                                                                    <div className="font-medium">{fallbackName}</div>
+                                                                    <div className="text-sm text-muted-foreground">{wallet.profiles?.email}</div>
+                                                                </div>
+                                                            </div>
+                                                        </TableCell>
+                                                        <TableCell className="capitalize">
+                                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${(wallet.profiles?.role || (wallet as any).role) === 'doctor'
+                                                                ? "bg-blue-100 text-blue-800"
+                                                                : "bg-gray-100 text-gray-800"
+                                                                }`}>
+                                                                {wallet.profiles?.role || (wallet as any).role}
+                                                            </span>
+                                                        </TableCell>
+                                                        <TableCell className="text-right font-mono font-medium">{wallet.balance.toFixed(2)}</TableCell>
+                                                        <TableCell className="text-right">
+                                                            <Dialog>
+                                                                <DialogTrigger asChild>
+                                                                    <Button variant="outline" size="sm" onClick={() => {
+                                                                        setSelectedWallet(wallet);
+                                                                        setAdjustmentReason('');
+                                                                        setAdjustmentReasonType('preset1');
+                                                                    }}>
+                                                                        <Edit2 className="w-4 h-4 mr-2" />
+                                                                        {(wallet.profiles?.role || (wallet as any).role) === 'doctor' ? 'Adjustment' : 'Refund'}
+                                                                    </Button>
+                                                                </DialogTrigger>
+                                                                <DialogContent>
+                                                                    <DialogHeader>
+                                                                        <DialogTitle>
+                                                                            {(wallet.profiles?.role || (wallet as any).role) === 'doctor'
+                                                                                ? 'Manual Wallet Adjustment'
+                                                                                : 'Issue Refund to User'}
+                                                                        </DialogTitle>
+                                                                    </DialogHeader>
+                                                                    <div className="py-4 space-y-4">
+                                                                        <div className="p-3 bg-muted rounded-lg">
+                                                                            <p className="text-sm font-medium">User: {wallet.profiles?.full_name || (wallet as any).name}</p>
+                                                                            <p className="text-sm text-muted-foreground">Current Balance: {wallet.balance.toFixed(2)}</p>
                                                                         </div>
-                                                                    </div>
 
-                                                                    {adjustmentReasonType === 'custom' && (
-                                                                        <div className="space-y-2 pt-2 border-t mt-2">
+                                                                        <div className="space-y-2">
+                                                                            <label className="text-sm font-medium">Amount</label>
                                                                             <Input
-                                                                                type="text"
-                                                                                placeholder="Type custom reason..."
-                                                                                value={adjustmentReason}
-                                                                                onChange={(e) => setAdjustmentReason(e.target.value)}
+                                                                                type="number"
+                                                                                placeholder="0.00"
+                                                                                value={adjustmentAmount}
+                                                                                onChange={(e) => setAdjustmentAmount(e.target.value)}
                                                                             />
                                                                         </div>
-                                                                    )}
-                                                                </div>
-                                                                <DialogFooter>
-                                                                    <Button onClick={handleAdjustment} disabled={processing} className="w-full">
-                                                                        {processing ? 'Processing...' : ((wallet.profiles?.role || (wallet as any).role) === 'doctor' ? 'Confirm Adjustment' : 'Confirm Refund')}
-                                                                    </Button>
-                                                                </DialogFooter>
-                                                            </DialogContent>
-                                                        </Dialog>
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))
+
+                                                                        <div className="space-y-3">
+                                                                            <label className="text-sm font-medium">Reason</label>
+                                                                            <div className="space-y-2">
+                                                                                <label className="flex items-center space-x-2">
+                                                                                    <input type="radio" name="reasonType" value="preset1" checked={adjustmentReasonType === 'preset1'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
+                                                                                    <span className="text-sm">{((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? 'Manual Wallet Adjustment via Admin' : 'Refund: Item Out of Stock / Damaged'}</span>
+                                                                                </label>
+                                                                                <label className="flex items-center space-x-2">
+                                                                                    <input type="radio" name="reasonType" value="preset2" checked={adjustmentReasonType === 'preset2'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
+                                                                                    <span className="text-sm">{((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? 'Bonus / Incentive' : 'Refund: Consultation Cancelled'}</span>
+                                                                                </label>
+                                                                                <label className="flex items-center space-x-2">
+                                                                                    <input type="radio" name="reasonType" value="custom" checked={adjustmentReasonType === 'custom'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
+                                                                                    <span className="text-sm">Other (Specify manually)</span>
+                                                                                </label>
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {adjustmentReasonType === 'custom' && (
+                                                                            <div className="space-y-2 pt-2 border-t mt-2">
+                                                                                <Input
+                                                                                    type="text"
+                                                                                    placeholder="Type custom reason..."
+                                                                                    value={adjustmentReason}
+                                                                                    onChange={(e) => setAdjustmentReason(e.target.value)}
+                                                                                />
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <DialogFooter>
+                                                                        <Button onClick={handleAdjustment} disabled={processing} className="w-full">
+                                                                            {processing ? 'Processing...' : ((wallet.profiles?.role || (wallet as any).role) === 'doctor' ? 'Confirm Adjustment' : 'Confirm Refund')}
+                                                                        </Button>
+                                                                    </DialogFooter>
+                                                                </DialogContent>
+                                                            </Dialog>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                );
+                                            })
                                         )}
                                     </TableBody>
                                 </Table>
